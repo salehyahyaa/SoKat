@@ -1,0 +1,12 @@
+{
+  "name": "closetscan",
+  "version": "1.0.0",
+  "description": "Measure a closet with an iPhone camera in the browser — reference-plane homography, 1/16\" accuracy target, zero dependencies.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "check": "find js tests -name '*.js' -exec node --check {} +",
+    "serve": "python3 -m http.server 8000"
+  },
+  "license": "MIT"
+}
