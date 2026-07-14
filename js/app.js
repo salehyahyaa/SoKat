@@ -73,14 +73,16 @@ export class ClosetScanApp {
   }
 
   async runGuarded(fn) {
+    if (this.busy) return; // ignore double-taps that would start a second flow
+    this.busy = true;
     try {
       await fn();
     } catch (err) {
-      if (err === HOME) { this.showScreen('welcome'); return; }
-      alert(`Something went wrong: ${err.message || err}`);
+      if (err !== HOME) alert(`Something went wrong: ${err.message || err}`);
       this.showScreen('welcome');
     } finally {
       this.teardownPicker();
+      this.busy = false;
     }
   }
 
@@ -97,30 +99,30 @@ export class ClosetScanApp {
 
   /**
    * Show the capture screen and wait for a photo.
+   * The camera button stays armed for the whole stay on this screen — a
+   * cancelled camera sheet (which fires no event on iOS) just means the user
+   * taps the button again.
    * @returns {Promise<HTMLCanvasElement>} throws HOME if the user backs out
    */
-  async capturePhoto(title, text) {
+  capturePhoto(title, text) {
     this.showScreen('capture');
     this.$('capture-title').textContent = title;
     this.$('capture-text').innerHTML = text;
     const btnCam = this.$('btn-open-camera');
     const btnBack = this.$('btn-capture-home');
-    while (true) {
-      const photo = await new Promise((resolve, reject) => {
-        const onCam = async () => {
-          cleanup();
-          try { resolve(await this.camera.capture()); } catch (e) { reject(e); }
-        };
-        const onBack = () => { cleanup(); reject(HOME); };
-        const cleanup = () => {
-          btnCam.removeEventListener('click', onCam);
-          btnBack.removeEventListener('click', onBack);
-        };
-        btnCam.addEventListener('click', onCam, { once: true });
-        btnBack.addEventListener('click', onBack, { once: true });
-      });
-      if (photo) return photo; // null = user cancelled the camera; stay here
-    }
+    return new Promise((resolve, reject) => {
+      const onCam = () => this.camera.request();
+      const onBack = () => { cleanup(); reject(HOME); };
+      const cleanup = () => {
+        btnCam.removeEventListener('click', onCam);
+        btnBack.removeEventListener('click', onBack);
+        this.camera.unsubscribe();
+      };
+      this.camera.onPhoto = (photo) => { cleanup(); resolve(photo); };
+      this.camera.onError = (err) => { cleanup(); reject(err); };
+      btnCam.addEventListener('click', onCam);
+      btnBack.addEventListener('click', onBack);
+    });
   }
 
   // ------------------------------------------------------------------ pick

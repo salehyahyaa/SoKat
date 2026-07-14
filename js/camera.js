@@ -1,54 +1,48 @@
 /**
  * CameraCapture — opens the iPhone's native camera from Safari via a hidden
- * `<input type="file" capture="environment">` and returns the photo as a
+ * `<input type="file" capture="environment">` and delivers the photo as a
  * full-resolution canvas.
  *
  * This path is chosen deliberately over getUserMedia: it needs no permission
  * prompt, works over plain HTTP, and captures at full sensor resolution
  * (12 MP) instead of video resolution — resolution is accuracy here.
+ *
+ * Callback-based by design: iOS fires NO event when the user cancels the
+ * camera sheet, so a promise returned per request() could hang forever.
+ * Instead one persistent change listener delivers photos to whoever is
+ * subscribed; a cancelled camera simply delivers nothing, and the caller's
+ * "Open Camera" button stays armed for another try.
  */
 export class CameraCapture {
   /** @param {HTMLInputElement} inputEl hidden file input with capture attribute */
   constructor(inputEl) {
     this.input = inputEl;
+    /** @type {((photo: HTMLCanvasElement) => void)|null} */
+    this.onPhoto = null;
+    /** @type {((err: Error) => void)|null} */
+    this.onError = null;
+    this.input.addEventListener('change', async () => {
+      const file = this.input.files && this.input.files[0];
+      this.input.value = '';
+      if (!file) return;
+      try {
+        const photo = await CameraCapture.fileToCanvas(file);
+        if (this.onPhoto) this.onPhoto(photo);
+      } catch (err) {
+        if (this.onError) this.onError(err);
+      }
+    });
   }
 
-  /**
-   * Trigger the camera and resolve with the photo drawn on a canvas
-   * (EXIF orientation applied). Resolves null if the user cancels.
-   * Must be called from a user-gesture handler (button tap).
-   * @returns {Promise<HTMLCanvasElement|null>}
-   */
-  capture() {
-    return new Promise((resolve, reject) => {
-      const onChange = async () => {
-        cleanup();
-        const file = this.input.files && this.input.files[0];
-        this.input.value = '';
-        if (!file) return resolve(null);
-        try {
-          resolve(await CameraCapture.fileToCanvas(file));
-        } catch (err) {
-          reject(err);
-        }
-      };
-      // iOS fires no event on cancel; if focus returns with no file, resolve null.
-      const onFocusBack = () => {
-        setTimeout(() => {
-          if (!this.input.files || this.input.files.length === 0) {
-            cleanup();
-            resolve(null);
-          }
-        }, 500);
-      };
-      const cleanup = () => {
-        this.input.removeEventListener('change', onChange);
-        window.removeEventListener('focus', onFocusBack);
-      };
-      this.input.addEventListener('change', onChange, { once: true });
-      window.addEventListener('focus', onFocusBack, { once: true });
-      this.input.click();
-    });
+  /** Open the camera. Must be called from a user-gesture handler. */
+  request() {
+    this.input.click();
+  }
+
+  /** Detach current subscribers (call when leaving a capture screen). */
+  unsubscribe() {
+    this.onPhoto = null;
+    this.onError = null;
   }
 
   /**

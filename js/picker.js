@@ -79,6 +79,13 @@ export class CornerPicker {
     this.scale = Math.min(sx, sy);
     this.offsetX = (this.canvas.width - this.photo.width * this.scale) / 2;
     this.offsetY = (this.canvas.height - this.photo.height * this.scale) / 2;
+    // Pre-scale the 12 MP photo once to display size so pointer-move redraws
+    // are cheap; the full-res photo is only sampled by the loupe.
+    this.display = document.createElement('canvas');
+    this.display.width = Math.max(1, Math.round(this.photo.width * this.scale));
+    this.display.height = Math.max(1, Math.round(this.photo.height * this.scale));
+    this.display.getContext('2d')
+      .drawImage(this.photo, 0, 0, this.display.width, this.display.height);
   }
 
   imgToCanvas(p) {
@@ -143,11 +150,7 @@ export class CornerPicker {
   render(fingerPos = null) {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(
-      this.photo,
-      this.offsetX, this.offsetY,
-      this.photo.width * this.scale, this.photo.height * this.scale,
-    );
+    ctx.drawImage(this.display, this.offsetX, this.offsetY);
     for (const ghost of this.ghosts) {
       ghost.points.forEach((pt, i) => this.drawMarker(pt, ghost.color, i + 1, true));
     }
@@ -196,12 +199,23 @@ export class CornerPicker {
     ctx.clip();
     ctx.fillStyle = '#000';
     ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    // Clamp the source rect to the photo bounds (Safari misrenders
+    // out-of-bounds source rects) and map the clamped part proportionally
+    // into the loupe, so corners near the photo edge still magnify correctly.
     const srcHalf = R / zoom;
-    ctx.drawImage(
-      this.photo,
-      imgPt.x - srcHalf, imgPt.y - srcHalf, srcHalf * 2, srcHalf * 2,
-      cx - R, cy - R, R * 2, R * 2,
-    );
+    const sx0 = Math.max(0, imgPt.x - srcHalf);
+    const sy0 = Math.max(0, imgPt.y - srcHalf);
+    const sx1 = Math.min(this.photo.width, imgPt.x + srcHalf);
+    const sy1 = Math.min(this.photo.height, imgPt.y + srcHalf);
+    if (sx1 > sx0 && sy1 > sy0) {
+      ctx.drawImage(
+        this.photo,
+        sx0, sy0, sx1 - sx0, sy1 - sy0,
+        cx - R + (sx0 - (imgPt.x - srcHalf)) * zoom,
+        cy - R + (sy0 - (imgPt.y - srcHalf)) * zoom,
+        (sx1 - sx0) * zoom, (sy1 - sy0) * zoom,
+      );
+    }
     // Crosshair marking the exact point.
     ctx.strokeStyle = this.color;
     ctx.lineWidth = 1.5 * this.dpr;
