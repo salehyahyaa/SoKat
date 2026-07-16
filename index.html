@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — measure any space with your iPhone</title>
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <main id="app">
@@ -20,7 +20,7 @@
       <ol class="how">
         <li><b>Take one photo</b> of the space or object.</li>
         <li><b>Tap its 6 corners</b>.</li>
-        <li><b>Enter one length you know</b> (like the ceiling height) — get it emptied, in 3D, with all its dimensions.</li>
+        <li><b>Enter one length you know</b> (like the ceiling height) — get its dimensions, a 3D model, and an eraser to remove objects from the photo.</li>
       </ol>
       <div class="stack">
         <button id="btn-start" class="primary">Scan — 1 photo</button>
@@ -76,11 +76,11 @@
     <!-- Results -->
     <section id="screen-results" class="screen no-pad">
       <header class="bar">
-        <h2>Your space — emptied &amp; measured</h2>
+        <h2>Your space — measured</h2>
       </header>
       <div id="dims"></div>
       <div id="view-toggle" class="seg">
-        <button id="btn-view-photo" class="seg-btn active">🧹 Emptied photo</button>
+        <button id="btn-view-photo" class="seg-btn active">📷 Photo</button>
         <button id="btn-view-3d" class="seg-btn">📐 3D model</button>
       </div>
       <div id="view-area">
@@ -91,7 +91,7 @@
         <button id="btn-erase" class="seg-btn">🧽 Erase objects</button>
         <button id="btn-erase-reset" class="seg-btn">↺ Reset</button>
       </div>
-      <p class="hint" id="view-hint">slide the handle — left: as photographed, right: contents removed</p>
+      <p class="hint" id="view-hint">tap Erase objects, then paint over anything to remove it</p>
       <p id="diagnostics"></p>
       <div class="bar buttons">
         <button id="btn-restart" class="secondary">Scan again</button>
@@ -111,6 +111,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=4"></script>
+  <script type="module" src="js/app.js?v=5"></script>
 </body>
 </html>

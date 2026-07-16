@@ -1,19 +1,16 @@
 /**
- * ClosetEmptier — digitally removes the closet's contents from the captured
- * photo. The four back-wall corners the user already tapped define the closet
- * interior in the image; everything inside that quad (clothes, rods, boxes)
- * is replaced with a clean wall-toned surface — lit with a vertical light
- * falloff, corner shading and a floor shadow so it reads as a real empty
- * closet, not a flat patch. Runs fully on-device on a downscaled copy.
+ * Photo editing views for the results screen.
  *
- * BeforeAfterView shows the result as a swipeable before/after comparison.
+ * buildEmptiedViews produces matched {original, emptied} display copies of
+ * the photo. The "emptied" copy starts identical — nothing synthetic is
+ * painted — and the user removes objects with the erase brush: a drag
+ * selects the object, and on release the region is inpainted by diffusing
+ * the surrounding real pixels inward, so the fill blends with the photo.
  */
 
 const MAX_DIM = 1600; // display copies; full-res isn't needed on a phone screen
 
-// Build matched {original, emptied} canvases from the back-wall photo and the
-// closet-corner quad (photo pixel coordinates, order TL TR BR BL).
-export function buildEmptiedViews(photo, quad, wallColor = '#b8b0a4') {
+export function buildEmptiedViews(photo) {
   const scale = Math.min(1, MAX_DIM / Math.max(photo.width, photo.height));
   const w = Math.max(1, Math.round(photo.width * scale));
   const h = Math.max(1, Math.round(photo.height * scale));
@@ -22,74 +19,8 @@ export function buildEmptiedViews(photo, quad, wallColor = '#b8b0a4') {
   original.width = w; original.height = h;
   original.getContext('2d').drawImage(photo, 0, 0, w, h);
 
-  const emptied = document.createElement('canvas');
-  emptied.width = w; emptied.height = h;
-  const ctx = emptied.getContext('2d');
-  ctx.drawImage(original, 0, 0);
-
-  const q = quad.map((p) => ({ x: p.x * scale, y: p.y * scale }));
-  paintEmptyInterior(ctx, q, parseColor(wallColor), Math.max(w, h));
-
+  const emptied = cloneCanvas(original);
   return { original, emptied };
-}
-
-function quadPath(ctx, q) {
-  ctx.beginPath();
-  ctx.moveTo(q[0].x, q[0].y);
-  for (let i = 1; i < 4; i++) ctx.lineTo(q[i].x, q[i].y);
-  ctx.closePath();
-}
-
-function paintEmptyInterior(ctx, q, rgb, dim) {
-  const minX = Math.min(...q.map((p) => p.x));
-  const maxX = Math.max(...q.map((p) => p.x));
-  const minY = Math.min(...q.map((p) => p.y));
-  const maxY = Math.max(...q.map((p) => p.y));
-
-  ctx.save();
-  quadPath(ctx, q);
-  ctx.clip();
-
-  // Base wall: brighter where ceiling light lands, darker toward the floor.
-  const base = ctx.createLinearGradient(0, minY, 0, maxY);
-  base.addColorStop(0, shade(rgb, 1.08));
-  base.addColorStop(0.55, shade(rgb, 0.99));
-  base.addColorStop(1, shade(rgb, 0.86));
-  ctx.fillStyle = base;
-  ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
-
-  // Side-wall falloff: interiors are darker toward the vertical corners.
-  const sides = ctx.createLinearGradient(minX, 0, maxX, 0);
-  sides.addColorStop(0, 'rgba(0,0,0,0.22)');
-  sides.addColorStop(0.18, 'rgba(0,0,0,0)');
-  sides.addColorStop(0.82, 'rgba(0,0,0,0)');
-  sides.addColorStop(1, 'rgba(0,0,0,0.22)');
-  ctx.fillStyle = sides;
-  ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
-
-  // Floor contact shadow along the bottom edge.
-  const floor = ctx.createLinearGradient(0, maxY - (maxY - minY) * 0.16, 0, maxY);
-  floor.addColorStop(0, 'rgba(0,0,0,0)');
-  floor.addColorStop(1, 'rgba(0,0,0,0.28)');
-  ctx.fillStyle = floor;
-  ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
-
-  // Fine noise so the synthetic wall matches photo grain instead of looking
-  // like a flat sticker.
-  ctx.globalAlpha = 0.05;
-  ctx.fillStyle = noisePattern(ctx);
-  ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
-  ctx.globalAlpha = 1;
-
-  // Soft inner shadow hugging the quad boundary (half the stroke is clipped
-  // away, leaving a feathered edge inside).
-  quadPath(ctx, q);
-  ctx.strokeStyle = 'rgba(0,0,0,0.30)';
-  ctx.lineWidth = dim * 0.02;
-  ctx.filter = 'blur(' + (dim * 0.006).toFixed(1) + 'px)';
-  ctx.stroke();
-  ctx.filter = 'none';
-  ctx.restore();
 }
 
 function noisePattern(ctx) {
@@ -104,22 +35,6 @@ function noisePattern(ctx) {
   }
   tctx.putImageData(img, 0, 0);
   return ctx.createPattern(tile, 'repeat');
-}
-
-export function parseColor(css) {
-  const hex = css.match(/^#([0-9a-f]{6})$/i);
-  if (hex) {
-    const n = parseInt(hex[1], 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
-  const rgb = css.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
-  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
-  return [184, 176, 164];
-}
-
-export function shade([r, g, b], light) {
-  const f = (c) => Math.round(Math.min(255, c * light));
-  return `rgb(${f(r)},${f(g)},${f(b)})`;
 }
 
 /**
@@ -143,10 +58,18 @@ export class BeforeAfterView {
     this.dpr = window.devicePixelRatio || 1;
     this.dragging = false;
     this.eraseMode = false;
+    this.stroke = []; // image-coord points of the erase stroke being drawn
 
     this._onDown = (e) => { this.dragging = true; this.canvas.setPointerCapture(e.pointerId); this.moveTo(e); };
     this._onMove = (e) => { if (this.dragging) this.moveTo(e); };
-    this._onUp = () => { this.dragging = false; };
+    this._onUp = () => {
+      this.dragging = false;
+      if (this.eraseMode && this.stroke.length) {
+        this.applyErase(this.stroke);
+        this.stroke = [];
+        this.render();
+      }
+    };
     this._onResize = () => { this.layout(); this.render(); };
 
     canvas.addEventListener('pointerdown', this._onDown);
@@ -186,10 +109,10 @@ export class BeforeAfterView {
     const x = (e.clientX - rect.left) * this.dpr;
     if (this.eraseMode) {
       const y = (e.clientY - rect.top) * this.dpr;
-      this.eraseAt(
-        ((x - this.drawX) / this.drawW) * this.emptied.width,
-        ((y - this.drawY) / this.drawH) * this.emptied.height,
-      );
+      this.stroke.push({
+        x: ((x - this.drawX) / this.drawW) * this.emptied.width,
+        y: ((y - this.drawY) / this.drawH) * this.emptied.height,
+      });
     } else {
       this.pos = Math.min(1, Math.max(0, (x - this.drawX) / this.drawW));
     }
@@ -209,34 +132,115 @@ export class BeforeAfterView {
     this.render();
   }
 
-  // Wipe a soft brush stamp at image coords: fill with the average color of
-  // a sampling ring around the stamp so it blends with the surroundings.
-  eraseAt(ix, iy) {
+  brushRadius() {
+    return Math.max(14, Math.max(this.emptied.width, this.emptied.height) * 0.045);
+  }
+
+  // Real object removal: rasterize the stroke into a mask, then fill the
+  // masked region by diffusing the surrounding photo pixels inward (Jacobi
+  // iterations on a downscaled patch), composite back through a feathered
+  // mask and re-grain — the object disappears into its surroundings.
+  applyErase(stroke) {
     const img = this.emptied;
-    if (ix < 0 || iy < 0 || ix >= img.width || iy >= img.height) return;
-    const ctx = img.getContext('2d');
-    const R = Math.max(10, Math.max(img.width, img.height) * 0.028);
-
-    let r = 0; let g = 0; let b = 0; let n = 0;
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * Math.PI * 2;
-      const sx = Math.round(ix + Math.cos(a) * R * 1.8);
-      const sy = Math.round(iy + Math.sin(a) * R * 1.8);
-      if (sx < 0 || sy < 0 || sx >= img.width || sy >= img.height) continue;
-      const d = ctx.getImageData(sx, sy, 1, 1).data;
-      r += d[0]; g += d[1]; b += d[2]; n++;
+    const R = this.brushRadius();
+    let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+    for (const p of stroke) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
     }
-    if (n === 0) return;
-    r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
+    minX = Math.max(0, Math.floor(minX - R * 2));
+    minY = Math.max(0, Math.floor(minY - R * 2));
+    maxX = Math.min(img.width, Math.ceil(maxX + R * 2));
+    maxY = Math.min(img.height, Math.ceil(maxY + R * 2));
+    const bw = maxX - minX; const bh = maxY - minY;
+    if (bw < 4 || bh < 4) return;
 
-    const grad = ctx.createRadialGradient(ix, iy, 0, ix, iy, R);
-    grad.addColorStop(0, `rgba(${r},${g},${b},0.95)`);
-    grad.addColorStop(0.7, `rgba(${r},${g},${b},0.8)`);
-    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(ix, iy, R, 0, Math.PI * 2);
-    ctx.fill();
+    // Work at reduced resolution — diffusion converges fast and the smooth
+    // result upscales cleanly.
+    const S = Math.min(1, 200 / Math.max(bw, bh));
+    const sw = Math.max(4, Math.round(bw * S));
+    const sh = Math.max(4, Math.round(bh * S));
+
+    const small = document.createElement('canvas');
+    small.width = sw; small.height = sh;
+    const sctx = small.getContext('2d');
+    sctx.drawImage(img, minX, minY, bw, bh, 0, 0, sw, sh);
+
+    // Feathered stroke mask (soft-edged circles along the stroke).
+    const maskC = document.createElement('canvas');
+    maskC.width = sw; maskC.height = sh;
+    const mctx = maskC.getContext('2d');
+    for (const p of stroke) {
+      const cx = (p.x - minX) * S; const cy = (p.y - minY) * S; const r = R * S;
+      const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.75, 'rgba(255,255,255,1)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      mctx.fillStyle = g;
+      mctx.beginPath(); mctx.arc(cx, cy, r, 0, Math.PI * 2); mctx.fill();
+    }
+
+    const cd = sctx.getImageData(0, 0, sw, sh);
+    const md = mctx.getImageData(0, 0, sw, sh);
+    const n = sw * sh;
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = md.data[i * 4 + 3] > 100 ? 1 : 0;
+
+    // Seed masked pixels with the average of the unmasked surroundings so
+    // diffusion starts near the answer.
+    let ar = 0; let ag = 0; let ab = 0; let an = 0;
+    for (let i = 0; i < n; i++) {
+      if (!mask[i]) { ar += cd.data[i * 4]; ag += cd.data[i * 4 + 1]; ab += cd.data[i * 4 + 2]; an++; }
+    }
+    if (an === 0) return;
+    ar /= an; ag /= an; ab /= an;
+    let a = new Float32Array(n * 3);
+    let b = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      a[i * 3] = mask[i] ? ar : cd.data[i * 4];
+      a[i * 3 + 1] = mask[i] ? ag : cd.data[i * 4 + 1];
+      a[i * 3 + 2] = mask[i] ? ab : cd.data[i * 4 + 2];
+    }
+    b.set(a);
+    for (let it = 0; it < 120; it++) {
+      for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+          const i = y * sw + x;
+          if (!mask[i]) continue;
+          const L = x > 0 ? i - 1 : i;
+          const Rt = x < sw - 1 ? i + 1 : i;
+          const U = y > 0 ? i - sw : i;
+          const D = y < sh - 1 ? i + sw : i;
+          b[i * 3] = (a[L * 3] + a[Rt * 3] + a[U * 3] + a[D * 3]) / 4;
+          b[i * 3 + 1] = (a[L * 3 + 1] + a[Rt * 3 + 1] + a[U * 3 + 1] + a[D * 3 + 1]) / 4;
+          b[i * 3 + 2] = (a[L * 3 + 2] + a[Rt * 3 + 2] + a[U * 3 + 2] + a[D * 3 + 2]) / 4;
+        }
+      }
+      const t = a; a = b; b = t;
+    }
+    for (let i = 0; i < n; i++) {
+      if (!mask[i]) continue;
+      cd.data[i * 4] = a[i * 3];
+      cd.data[i * 4 + 1] = a[i * 3 + 1];
+      cd.data[i * 4 + 2] = a[i * 3 + 2];
+    }
+    sctx.putImageData(cd, 0, 0);
+
+    // Keep only the (feathered) masked part of the fill, re-grain it so it
+    // matches photo texture, then composite back at full resolution.
+    sctx.globalCompositeOperation = 'destination-in';
+    sctx.drawImage(maskC, 0, 0);
+    sctx.globalCompositeOperation = 'source-atop';
+    sctx.globalAlpha = 0.05;
+    sctx.fillStyle = noisePattern(sctx);
+    sctx.fillRect(0, 0, sw, sh);
+    sctx.globalAlpha = 1;
+    sctx.globalCompositeOperation = 'source-over';
+
+    const ictx = img.getContext('2d');
+    ictx.imageSmoothingEnabled = true;
+    ictx.imageSmoothingQuality = 'high';
+    ictx.drawImage(small, 0, 0, sw, sh, minX, minY, bw, bh);
   }
 
   render() {
@@ -254,11 +258,25 @@ export class BeforeAfterView {
     ctx.restore();
 
     if (this.eraseMode) {
-      this.drawTag('ERASE — drag over an object to wipe it', this.drawX + 8 * this.dpr, false);
+      // Live preview of the selection being painted.
+      if (this.stroke.length) {
+        const r = this.brushRadius() * (this.drawW / this.emptied.width);
+        this.ctx.save();
+        this.ctx.fillStyle = 'rgba(0, 229, 160, 0.30)';
+        for (const p of this.stroke) {
+          const cx = this.drawX + (p.x / this.emptied.width) * this.drawW;
+          const cy = this.drawY + (p.y / this.emptied.height) * this.drawH;
+          this.ctx.beginPath();
+          this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
+        this.ctx.restore();
+      }
+      this.drawTag('ERASE — paint over an object, lift to remove it', this.drawX + 8 * this.dpr, false);
     } else {
       this.drawDivider(split);
-      this.drawTag('WITH CONTENTS', this.drawX + 8 * this.dpr, false);
-      this.drawTag('EMPTIED', this.drawX + this.drawW - 8 * this.dpr, true);
+      this.drawTag('ORIGINAL', this.drawX + 8 * this.dpr, false);
+      this.drawTag('EDITED', this.drawX + this.drawW - 8 * this.dpr, true);
     }
   }
 

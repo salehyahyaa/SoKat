@@ -8,8 +8,9 @@
  *   recovers every dimension ratio from the perspective (EXIF focal when
  *   available) → the user enters ONE length they know (e.g. ceiling height)
  *   which sets the absolute scale for all three dimensions.
- *   Results: dimensions, a before/after "contents removed" photo with an
- *   object-eraser brush, and a rotatable 3D model of the empty space.
+ *   Results: dimensions, the photo with an object-eraser brush (paint over
+ *   anything to remove it — inpainted from the surrounding pixels), and a
+ *   rotatable 3D model of the space.
  */
 import { CameraCapture } from './camera.js';
 import { CornerPicker } from './picker.js';
@@ -187,10 +188,10 @@ export class SpaceScanApp {
     const scan = await this.stepScan();
     const model = await this.askScale(scan.raw);
     await this.withLoading(
-      'Emptying the space…',
-      'Removing contents and calculating dimensions',
+      'Calculating dimensions…',
+      'Solving the 3D geometry from your corners',
       async () => this.showResults({ ...scan, model }),
-      1400,
+      1200,
     );
   }
 
@@ -214,7 +215,7 @@ export class SpaceScanApp {
         const metro = rectangleMetrology([bl, br, fr, fl], photo.width, photo.height, {
           focalPx: photo.focalPx || null,
         });
-        const backQuad = [tl, tr, br, bl]; // TL TR BR BL of the back face
+        const backQuad = [tl, tr, br, bl]; // used only to sample a wall tint
         return {
           // Every ratio is right; the absolute scale comes from askScale().
           raw: {
@@ -224,7 +225,6 @@ export class SpaceScanApp {
             heightRight: metro.wallHeight(bl, br, tr),
           },
           photo,
-          backQuad,
           wallColor: sampleWallColor(photo, backQuad),
           note: photo.focalPx
             ? 'One-photo scan, scaled from the length you entered'
@@ -285,7 +285,7 @@ export class SpaceScanApp {
 
   // --------------------------------------------------------------- results
 
-  showResults({ model, photo, backQuad, wallColor, note }) {
+  showResults({ model, photo, wallColor, note }) {
     this.showScreen('results');
     this.$('dims').innerHTML = [
       dimCard('Width', model.widthText),
@@ -303,9 +303,8 @@ export class SpaceScanApp {
     if (this.compareView) { this.compareView.destroy(); this.compareView = null; }
     this.resultsModel = model;
     this.resultsWallColor = wallColor;
-    if (photo && backQuad) {
-      const views = buildEmptiedViews(photo, backQuad, wallColor);
-      this.compareView = new BeforeAfterView(this.$('compare-canvas'), views);
+    if (photo) {
+      this.compareView = new BeforeAfterView(this.$('compare-canvas'), buildEmptiedViews(photo));
     }
     this.$('btn-erase').classList.remove('active');
     this.setResultsView(this.compareView ? 'photo' : '3d');
@@ -318,8 +317,8 @@ export class SpaceScanApp {
     this.compareView.setEraseMode(on);
     this.$('btn-erase').classList.toggle('active', on);
     this.$('view-hint').textContent = on
-      ? 'drag over any object to wipe it away — tap Erase again when done'
-      : 'slide the handle — left: as photographed, right: contents removed';
+      ? 'paint over an object and lift your finger — it disappears'
+      : 'slide the handle to compare original vs edited';
   }
 
   // Toggle between the emptied-photo comparison and the 3D model. Views are
@@ -332,7 +331,7 @@ export class SpaceScanApp {
     this.$('scene-canvas').hidden = !!photoMode;
     this.$('erase-bar').hidden = !photoMode;
     if (photoMode) {
-      this.$('view-hint').textContent = 'slide the handle — left: as photographed, right: contents removed';
+      this.$('view-hint').textContent = 'tap Erase objects, then paint over anything to remove it';
       this.compareView.layout();
       this.compareView.render();
     } else {
