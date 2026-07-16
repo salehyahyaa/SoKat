@@ -1,25 +1,21 @@
 /**
- * SpaceScanApp — orchestrator for the paper-calibrated measurement flow.
+ * SpaceScanApp — orchestrator for the reference-calibrated measurement flow.
  *
  * Sensor: the iPhone camera, via Safari's <input capture> (no LiDAR/ARKit/
- * WebXR — Safari doesn't expose them). Physical scale comes from a US
- * Letter sheet (8.5×11″) placed on the measured plane; a 4-corner tap
- * calibrates a homography (perspective rectification) and two endpoint taps
- * measure a real distance on that plane.
+ * WebXR — Safari doesn't expose them). Physical scale comes from ANY flat
+ * rectangle of known size (default: 8.5×11″ paper) placed on the measured
+ * plane; a 4-corner tap calibrates a homography (perspective rectification)
+ * and two endpoint taps measure a real distance on that plane.
  *
- * Flow: width & height from one BACK-WALL view (sheet taped to the wall),
- * depth from one FLOOR view (sheet on the floor) — each dimension's
- * reference and endpoints share a physical plane. Every stage is validated
- * (quad geometry, sheet rectangularity + edge order, endpoint plausibility)
- * and scored; low confidence blocks the result. The contents are "removed"
- * by the parametric 3D closet model built from the measured dimensions; the
- * photo inpainting brush is kept as an experimental visual cleanup only.
+ * Flow: ONE photo of the back wall with the reference on it → tap the
+ * reference's 4 corners (any order around it) → tap + confirm the width →
+ * tap + confirm the height → results. Every stage is validated and scored;
+ * low confidence blocks the result. The photo inpainting brush is an
+ * experimental visual cleanup only.
  */
 import { CameraCapture } from './camera.js';
 import { CornerPicker } from './picker.js';
 import { PlaneMeasurement } from './measurement.js';
-import { ClosetModel } from './closet-model.js';
-import { EmptyClosetRenderer } from './renderer.js';
 import { buildEmptiedViews, PhotoEraser } from './emptier.js';
 import {
   validatePaperQuad, paperPoseChecks, validateEndpoints, validateResultDims,
@@ -32,18 +28,24 @@ const HOME = Symbol('home');
 const TARGET_COLOR = '#00e5a0';
 const PAPER_COLOR = '#4da3ff';
 
-const PAPER_LABELS = [
-  'first sheet corner (any one)',
-  'next corner, going around the sheet',
+const REF_LABELS = [
+  'first reference corner (any one)',
+  'next corner, going around it',
   'third corner, same direction',
   'last corner',
 ];
 const ENDPOINT_LABELS = {
-  width: ['LEFT corner of the back wall', 'RIGHT corner of the back wall'],
-  height: ['FLOOR line of the back wall', 'CEILING line, straight above'],
-  depth: ['BACK of the floor (base of the back wall)', 'FRONT edge of the floor'],
+  width: ['LEFT edge of what you\'re measuring', 'RIGHT edge'],
+  height: ['BOTTOM of what you\'re measuring', 'TOP, straight above'],
 };
-const VIEW_DIMS = { wall: ['width', 'height'], floor: ['depth'] };
+
+// Reference rectangle size (inches); default is a letter sheet, but any
+// flat rectangle of known size works. Persisted once set.
+function refDims() {
+  const l = parseFloat(localStorage.getItem('ref-long-in'));
+  const s = parseFloat(localStorage.getItem('ref-short-in'));
+  return (l > 0 && s > 0) ? [l, s] : [11, 8.5];
+}
 
 export class SpaceScanApp {
   constructor(doc = document) {
@@ -51,13 +53,10 @@ export class SpaceScanApp {
     this.$ = (id) => doc.getElementById(id);
     this.camera = new CameraCapture(this.$('camera-input'));
     this.picker = null;
-    this.renderer = null;
     this.eraserView = null;
 
     this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
-    this.$('btn-view-photo').addEventListener('click', () => this.setResultsView('photo'));
-    this.$('btn-view-3d').addEventListener('click', () => this.setResultsView('3d'));
     this.$('btn-erase-undo').addEventListener('click', () => { if (this.eraserView) this.eraserView.undo(); });
     this.$('btn-erase-reset').addEventListener('click', () => { if (this.eraserView) this.eraserView.reset(); });
     this.$('btn-diagnostics').addEventListener('click', () => {
@@ -127,6 +126,17 @@ export class SpaceScanApp {
   showGuide() {
     this.showScreen('guide');
     drawIllustration(this.$('guide-large'), 'wall');
+    const [l, s] = refDims();
+    this.$('ref-long').value = l;
+    this.$('ref-short').value = s;
+    const save = () => {
+      const lv = parseFloat(this.$('ref-long').value);
+      const sv = parseFloat(this.$('ref-short').value);
+      if (lv > 0) localStorage.setItem('ref-long-in', String(lv));
+      if (sv > 0) localStorage.setItem('ref-short-in', String(sv));
+    };
+    this.$('ref-long').oninput = save;
+    this.$('ref-short').oninput = save;
     const btnGo = this.$('btn-guide-continue');
     const btnHome = this.$('btn-guide-home');
     return new Promise((resolve, reject) => {
@@ -143,15 +153,13 @@ export class SpaceScanApp {
 
   // ---------------------------------------------------------------- capture
 
-  capturePhoto(view) {
+  capturePhoto() {
     this.showScreen('capture');
-    this.$('capture-title').textContent = view === 'wall'
-      ? 'Step 1 · Back wall (width & height)'
-      : 'Step 2 · Floor (depth)';
-    this.$('capture-text').innerHTML = view === 'wall'
-      ? 'Tape the sheet <b>flat on the back wall</b>, landscape.<br>Photograph the <b>whole wall</b>, standing centered.'
-      : 'Move the sheet <b>flat onto the floor</b>.<br>Photograph the floor from the <b>back wall to the front edge</b>.';
-    drawIllustration(this.$('capture-illust'), view);
+    this.$('capture-title').textContent = 'One photo';
+    this.$('capture-text').innerHTML =
+      'Put the reference <b>flat against the back wall</b>.<br>'
+      + 'Photograph the <b>whole wall</b>, standing centered.';
+    drawIllustration(this.$('capture-illust'), 'wall');
     const btnCam = this.$('btn-open-camera');
     const btnBack = this.$('btn-capture-home');
     return new Promise((resolve, reject) => {
@@ -290,9 +298,8 @@ export class SpaceScanApp {
 
   async runScan() {
     await this.showGuide();
-    const wall = await this.scanView('wall');
-    const floor = await this.scanView('floor');
-    const outcome = this.assemble(wall, floor);
+    const wall = await this.scanView();
+    const outcome = this.assemble(wall);
     if (!outcome.ok) {
       this.showBlocked(outcome);
       return;
@@ -300,30 +307,31 @@ export class SpaceScanApp {
     await this.withLoading('Calculating…', '', async () => this.showResults(outcome), 1000);
   }
 
-  // One calibrated view: photo -> checklist -> sheet corners -> one endpoint
-  // pair per dimension on that plane, each accepted with a live value.
-  async scanView(view) {
-    const dims = VIEW_DIMS[view];
+  // The calibrated view: photo -> checklist -> reference corners -> width
+  // endpoints (confirm) -> height endpoints (confirm).
+  async scanView() {
+    const dims = ['width', 'height'];
     while (true) {
-      const photo = await this.capturePhoto(view);
+      const photo = await this.capturePhoto();
       if (await this.photoChecklist(photo) === RETAKE) continue;
       const imgW = photo.width; const imgH = photo.height;
 
       let poseResult = null;
-      let chosenDims = [11, 8.5];
+      const [refL, refS] = refDims();
+      let chosenDims = [refL, refS];
       const paper = await this.pickStage(photo, {
-        title: `Calibrate — sheet corners (${view})`,
-        labels: PAPER_LABELS,
-        illustration: 'paper',
+        title: 'Calibrate — reference corners',
+        labels: REF_LABELS,
+        illustration: 'ref',
         segments: [[0, 1], [1, 2], [2, 3], [3, 0]],
         validate: (pts) => {
           const quad = validatePaperQuad(pts, imgW, imgH);
           if (!quad.ok) return quad;
-          // The user may go around the sheet starting on either edge — try
-          // both world mappings and keep the one that matches a real
-          // 8.5×11 rectangle (edge-norm ratio closest to 1).
+          // The user may go around the reference starting on either edge —
+          // try both world mappings and keep the one whose edge-norm ratio
+          // matches the real rectangle.
           let best = null;
-          for (const dims2 of [[11, 8.5], [8.5, 11]]) {
+          for (const dims2 of [[refL, refS], [refS, refL]]) {
             let plane2;
             try {
               plane2 = new PlaneMeasurement(pts, dims2[0], dims2[1]);
@@ -335,7 +343,7 @@ export class SpaceScanApp {
             const ratioErr = Math.abs(Math.log(pose.metrics.normRatio ?? 1));
             if (!best || ratioErr < best.ratioErr) best = { pose, ratioErr, dims: dims2 };
           }
-          if (!best) return { ok: false, errors: [{ code: 'degenerate', message: 'These corner taps don\'t form a usable sheet — re-place them.' }] };
+          if (!best) return { ok: false, errors: [{ code: 'degenerate', message: 'These corner taps don\'t form a usable reference — re-place them.' }] };
           chosenDims = best.dims;
           poseResult = { ...best.pose, metrics: { ...best.pose.metrics, areaFrac: quad.metrics.areaFrac } };
           return best.pose.ok ? { ok: true } : best.pose;
@@ -344,7 +352,7 @@ export class SpaceScanApp {
       if (paper === RETAKE) continue;
 
       const plane = new PlaneMeasurement(paper, chosenDims[0], chosenDims[1]);
-      const out = { view, photo, paper, pose: poseResult, measures: {}, checks: {} };
+      const out = { photo, paper, pose: poseResult, measures: {}, checks: {} };
       let retakeView = false;
       for (const dim of dims) {
         const pts = await this.pickStage(photo, {
@@ -371,35 +379,31 @@ export class SpaceScanApp {
     }
   }
 
-  assemble(wall, floor) {
+  assemble(wall) {
     const dims = {
       width: wall.measures.width,
       height: wall.measures.height,
-      depth: floor.measures.depth,
     };
     const plaus = validateResultDims(dims);
 
-    const viewConf = (v) => confidenceView({
-      paperAreaFrac: v.pose.metrics.areaFrac,
-      orthoResidual: v.pose.metrics.orthoResidual ?? null,
-      normRatio: v.pose.metrics.normRatio ?? 1,
-      leverage: Math.max(...Object.values(v.checks).map((c) => c.metrics.leverage || 3)),
-      megapixels: (v.photo.width * v.photo.height) / 1e6,
-      hasExifFocal: !!v.photo.focalPx,
-      focalDisagreePct: v.pose.metrics.focalDisagreePct ?? null,
-      warnings: v.pose.warnings.length + Object.values(v.checks).reduce((a, c) => a + c.warnings.length, 0),
+    const conf0 = confidenceView({
+      paperAreaFrac: wall.pose.metrics.areaFrac,
+      orthoResidual: wall.pose.metrics.orthoResidual ?? null,
+      normRatio: wall.pose.metrics.normRatio ?? 1,
+      leverage: Math.max(...Object.values(wall.checks).map((c) => c.metrics.leverage || 3)),
+      megapixels: (wall.photo.width * wall.photo.height) / 1e6,
+      hasExifFocal: !!wall.photo.focalPx,
+      focalDisagreePct: wall.pose.metrics.focalDisagreePct ?? null,
+      warnings: wall.pose.warnings.length + Object.values(wall.checks).reduce((x, c) => x + c.warnings.length, 0),
     });
-    const confWall = viewConf(wall);
-    const confFloor = viewConf(floor);
-    const conf = confidenceOverall([confWall, confFloor], plaus.warnings.length);
+    const conf = confidenceOverall([conf0], plaus.warnings.length);
 
     const bands = {};
-    for (const [dim, v] of [['width', wall], ['height', wall], ['depth', floor]]) {
-      if (!(dim in v.measures)) continue;
+    for (const dim of ['width', 'height']) {
       bands[dim] = errorBandPct({
-        leverage: v.checks[dim]?.metrics.leverage ?? 3,
-        orthoResidual: v.pose.metrics.orthoResidual ?? 0,
-        paperAreaFrac: v.pose.metrics.areaFrac,
+        leverage: wall.checks[dim]?.metrics.leverage ?? 3,
+        orthoResidual: wall.pose.metrics.orthoResidual ?? 0,
+        paperAreaFrac: wall.pose.metrics.areaFrac,
       });
     }
 
@@ -411,11 +415,8 @@ export class SpaceScanApp {
       dims,
       bands,
       conf,
-      confWall,
-      confFloor,
       plaus,
       wall,
-      floor,
     };
   }
 
@@ -451,7 +452,7 @@ export class SpaceScanApp {
       ? outcome.conf.reasons.join('; ')
       : 'all checks clean';
 
-    this.$('dims').innerHTML = ['width', 'height', 'depth'].map((d) => (
+    this.$('dims').innerHTML = ['width', 'height'].map((d) => (
       `<div class="dim-card"><div class="dim-label">${d}</div>`
       + `<div class="dim-value">${toFraction(outcome.dims[d])}</div>`
       + `<div class="dim-edit">${feetInches(outcome.dims[d])} · ±${outcome.bands[d]}%</div></div>`
@@ -460,64 +461,32 @@ export class SpaceScanApp {
     this.$('result-warnings').innerHTML = outcome.plaus.warnings
       .map((w) => `⚠ ${escapeHtml(w.message)}`).join('<br>');
 
-    const viewDiag = (v, name) => {
-      const m = v.pose.metrics;
-      const lev = Object.entries(v.checks).map(([d, c]) => `${d} ${c.metrics.leverage?.toFixed(1) ?? '—'}×`).join(', ');
-      return [
-        `${name}: sheet ${(m.areaFrac * 100).toFixed(2)}% of frame · ortho ${m.orthoResidual?.toFixed(4) ?? 'n/a'} · edge-ratio ${m.normRatio?.toFixed(3) ?? 'n/a'}`,
-        `  focal: EXIF ${m.focalEXIF ? m.focalEXIF.toFixed(0) : 'none'} · VP ${m.focalVP ? m.focalVP.toFixed(0) : 'n/a'}${m.focalDisagreePct != null ? ` (Δ${m.focalDisagreePct.toFixed(1)}%)` : ''} · leverage ${lev}`,
-      ].join('\n');
-    };
+    const m = outcome.wall.pose.metrics;
+    const lev = Object.entries(outcome.wall.checks)
+      .map(([d, c]) => `${d} ${c.metrics.leverage?.toFixed(1) ?? '—'}×`).join(', ');
     this.$('diag-panel').textContent = [
-      `dims (unrounded): W ${outcome.dims.width.toFixed(4)}″  H ${outcome.dims.height.toFixed(4)}″  D ${outcome.dims.depth.toFixed(4)}″`,
-      viewDiag(outcome.wall, 'wall view'),
-      viewDiag(outcome.floor, 'floor view'),
-      `confidence: wall ${outcome.confWall.score} · floor ${outcome.confFloor.score} · overall ${outcome.conf.score}/100`,
+      `dims (unrounded): W ${outcome.dims.width.toFixed(4)}″  H ${outcome.dims.height.toFixed(4)}″`,
+      `reference: ${(m.areaFrac * 100).toFixed(2)}% of frame · ortho ${m.orthoResidual?.toFixed(4) ?? 'n/a'} · edge-ratio ${m.normRatio?.toFixed(3) ?? 'n/a'}`,
+      `focal: EXIF ${m.focalEXIF ? m.focalEXIF.toFixed(0) : 'none'} · VP ${m.focalVP ? m.focalVP.toFixed(0) : 'n/a'}${m.focalDisagreePct != null ? ` (Δ${m.focalDisagreePct.toFixed(1)}%)` : ''} · leverage ${lev}`,
+      `confidence: ${outcome.conf.score}/100`,
       '',
       '1/16″ formatting is display resolution, not measured accuracy.',
       'Accuracy evidence lives in Validation mode (app vs tape measure).',
     ].join('\n');
     this.$('diag-panel').hidden = true;
 
-    // Parametric 3D closet — the reliable "contents removed" representation.
-    this.resultsModel = new ClosetModel({
-      widthTop: outcome.dims.width, widthBottom: outcome.dims.width,
-      heightLeft: outcome.dims.height, heightRight: outcome.dims.height,
-      depth: outcome.dims.depth,
-    });
-    if (this.renderer) { this.renderer.destroy(); this.renderer = null; }
     if (this.eraserView) { this.eraserView.destroy(); this.eraserView = null; }
     this.eraserView = new PhotoEraser(this.$('compare-canvas'), buildEmptiedViews(outcome.wall.photo), []);
-    this.setResultsView('3d');
-  }
-
-  setResultsView(which) {
-    const photoMode = which === 'photo' && this.eraserView;
-    this.$('btn-view-photo').classList.toggle('active', !!photoMode);
-    this.$('btn-view-3d').classList.toggle('active', !photoMode);
-    this.$('compare-canvas').hidden = !photoMode;
-    this.$('scene-canvas').hidden = !!photoMode;
-    this.$('erase-bar').hidden = !photoMode;
-    if (photoMode) {
-      this.$('view-hint').textContent = 'experimental cleanup: drag over an object to blend it away (approximate — hidden detail is not reconstructed)';
-      this.eraserView.layout();
-      this.eraserView.render();
-    } else {
-      this.$('view-hint').textContent = 'the measured closet, emptied — drag to rotate';
-      if (!this.renderer && this.resultsModel) {
-        this.renderer = new EmptyClosetRenderer(this.$('scene-canvas'), this.resultsModel, {});
-      } else if (this.renderer) {
-        this.renderer.layout();
-        this.renderer.render();
-      }
-    }
+    this.$('view-hint').textContent = 'cleanup (beta): drag over an object to blend it away — approximate, hidden detail is not reconstructed';
+    this.eraserView.layout();
+    this.eraserView.render();
   }
 
   // ------------------------------------------------------- validation mode
 
   openValidation() {
     this.showScreen('validate');
-    for (const id of ['val-w', 'val-h', 'val-d']) this.$(id).value = '';
+    for (const id of ['val-w', 'val-h']) this.$(id).value = '';
     this.renderValidation();
   }
 
@@ -529,15 +498,14 @@ export class SpaceScanApp {
     const measured = {
       width: parseFloat(this.$('val-w').value),
       height: parseFloat(this.$('val-h').value),
-      depth: parseFloat(this.$('val-d').value),
     };
     if (!Object.values(measured).every((v) => Number.isFinite(v) && v > 0)) {
-      alert('Enter all three tape-measured dimensions in inches.');
+      alert('Enter both tape-measured dimensions in inches.');
       return;
     }
     const app = this.current.dims;
     const trial = { at: new Date().toISOString(), confidence: this.current.conf.level, dims: {} };
-    for (const d of ['width', 'height', 'depth']) {
+    for (const d of ['width', 'height']) {
       const err = app[d] - measured[d];
       trial.dims[d] = {
         app: round3(app[d]),
@@ -561,13 +529,13 @@ export class SpaceScanApp {
       return;
     }
     const rows = all.map((t, i) => {
-      const cells = ['width', 'height', 'depth'].map((d) => {
+      const cells = ['width', 'height'].map((d) => {
         const c = t.dims[d];
         return `<td>${c.app}″ / ${c.measured}″<br><span class="err">${c.errorIn >= 0 ? '+' : ''}${c.errorIn}″ (${c.errorPct}%)</span></td>`;
       }).join('');
       return `<tr><td>#${i + 1}<br><span class="err">${t.at.slice(0, 10)}</span></td>${cells}</tr>`;
     }).join('');
-    table.innerHTML = `<table><thead><tr><th>trial</th><th>W app/tape</th><th>H app/tape</th><th>D app/tape</th></tr></thead><tbody>${rows}</tbody></table>`;
+    table.innerHTML = `<table><thead><tr><th>trial</th><th>W app/tape</th><th>H app/tape</th></tr></thead><tbody>${rows}</tbody></table>`;
 
     const errs = all.flatMap((t) => Object.values(t.dims).map((c) => Math.abs(c.errorIn)));
     const mae = errs.reduce((a, b) => a + b, 0) / errs.length;
@@ -590,7 +558,7 @@ export class SpaceScanApp {
       name = 'spacescan-validation.json';
     } else {
       const header = 'trial,timestamp,confidence,dimension,app_in,measured_in,error_in,error_pct';
-      const lines = all.flatMap((t, i) => ['width', 'height', 'depth'].map((d) => {
+      const lines = all.flatMap((t, i) => ['width', 'height'].map((d) => {
         const c = t.dims[d];
         return `${i + 1},${t.at},${t.confidence},${d},${c.app},${c.measured},${c.errorIn},${c.errorPct}`;
       }));
@@ -618,8 +586,8 @@ function autoCheck(pass, text) {
   return `<li class="${pass ? 'ok' : 'warn'}">${pass ? '✓' : '⚠'} ${escapeHtml(text)}</li>`;
 }
 
-// Minimal illustrations: wall/floor scene sketches, the sheet's tap order,
-// and per-dimension measurement arrows. 128-unit coordinate space.
+// Minimal illustrations: the wall scene, the reference's corner taps, and
+// per-dimension measurement arrows. 128-unit coordinate space.
 export function drawIllustration(canvas, kind) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width; const H = canvas.height;
@@ -659,8 +627,8 @@ export function drawIllustration(canvas, kind) {
     ctx.strokeStyle = '#5b6b80';
   };
 
-  if (kind === 'paper') {
-    // Sheet with numbered corners; taps start along a long edge.
+  if (kind === 'ref') {
+    // Reference rectangle with numbered corners (any order around it).
     ctx.strokeRect(...P(14, 34), 100 * sx, 60 * sy);
     const corners = [[14, 34], [114, 34], [114, 94], [14, 94]];
     corners.forEach(([x, y], i) => {
@@ -674,10 +642,8 @@ export function drawIllustration(canvas, kind) {
     return;
   }
   if (kind === 'wall') { drawWall(); paperAt(53, 42); drawFloor(); return; }
-  if (kind === 'floor') { drawFloor(); paperAt(53, 96, 24, 16); return; }
   if (kind === 'width') { drawWall(); paperAt(53, 30); arrow(20, 78, 108, 78); return; }
   if (kind === 'height') { drawWall(); paperAt(53, 42); arrow(28, 90, 28, 16); return; }
-  if (kind === 'depth') { drawFloor(); paperAt(72, 96, 24, 16); arrow(40, 94, 30, 116); return; }
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && document.getElementById('screen-welcome')) {

@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — closet measurement</title>
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
   <main id="app">
@@ -15,16 +15,16 @@
     <section id="screen-welcome" class="screen">
       <div class="hero">
         <h1>Space<span>Scan</span></h1>
-        <p class="tagline">Closet measurement from iPhone photos, calibrated by a letter-size sheet.</p>
+        <p class="tagline">Measure width &amp; height from one iPhone photo, calibrated by any flat rectangle of known size.</p>
       </div>
       <ol class="how">
-        <li><b>Wall photo</b> → width &amp; height</li>
-        <li><b>Floor photo</b> → depth</li>
-        <li><b>Results</b> — dimensions + empty 3D closet</li>
+        <li><b>One photo</b> with the reference in it</li>
+        <li><b>Tap</b> — 4 reference corners, then 2 endpoints per dimension</li>
+        <li><b>Results</b> — width &amp; height</li>
       </ol>
       <p class="supported">
-        Needs: one <b>US-Letter sheet</b> (8.5×11″) + tape.<br>
-        For rectangular closets &amp; alcoves. Sensor: the iPhone camera (Safari has no LiDAR access).
+        Needs: any <b>flat rectangle of known size</b> (default: 8.5×11″ paper).<br>
+        Sensor: the iPhone camera (Safari has no LiDAR access).
       </p>
       <div class="stack">
         <button id="btn-start" class="primary">Start</button>
@@ -38,15 +38,20 @@
       <div class="guide-wrap">
         <canvas id="guide-large" width="512" height="512"></canvas>
         <ul class="tap-order">
-          <li>Sheet = the size reference</li>
+          <li>Reference = the known size</li>
           <li>Tap its 4 corners to calibrate</li>
           <li>Tap 2 endpoints to measure</li>
         </ul>
       </div>
+      <div class="acc-grid">
+        <div class="acc-row"><span>Reference size (long × short)</span>
+          <span class="ref-size"><input id="ref-long" type="number" inputmode="decimal" min="0" step="0.1"> × <input id="ref-short" type="number" inputmode="decimal" min="0" step="0.1"> ″</span>
+        </div>
+      </div>
       <ul class="checklist">
-        <li>Sheet <b>flat</b> on the measured surface</li>
+        <li>Reference <b>flat</b> on the measured surface</li>
         <li>Stand centered · avoid 0.5× lens &amp; heavy tilt</li>
-        <li>Good light · sheet and both endpoints in frame</li>
+        <li>Good light · reference and endpoints in frame</li>
       </ul>
       <div class="stack push-down">
         <button id="btn-guide-continue" class="primary">Start step 1</button>
@@ -71,7 +76,7 @@
       <canvas id="photocheck-canvas"></canvas>
       <ul class="checklist auto" id="photocheck-auto"></ul>
       <ul class="checklist" id="photocheck-list">
-        <li><label><input id="photocheck-confirm" type="checkbox"> Sheet is flat and fully visible</label></li>
+        <li><label><input id="photocheck-confirm" type="checkbox"> Reference is flat and fully visible</label></li>
       </ul>
       <div class="bar buttons">
         <button id="btn-photocheck-retake" class="secondary">Retake</button>
@@ -115,15 +120,10 @@
       <div id="conf-badge" class="badge"></div>
       <p id="conf-reasons" class="hint"></p>
       <div id="dims"></div>
-      <div id="view-toggle" class="seg">
-        <button id="btn-view-3d" class="seg-btn active">📐 Empty closet (3D)</button>
-        <button id="btn-view-photo" class="seg-btn">🧪 Cleanup (beta)</button>
-      </div>
       <div id="view-area">
-        <canvas id="scene-canvas"></canvas>
-        <canvas id="compare-canvas" hidden></canvas>
+        <canvas id="compare-canvas"></canvas>
       </div>
-      <div id="erase-bar" hidden>
+      <div id="erase-bar">
         <button id="btn-erase-undo" class="seg-btn">↶ Undo</button>
         <button id="btn-erase-reset" class="seg-btn">↺ Reset</button>
       </div>
@@ -143,8 +143,7 @@
       <div class="acc-grid">
         <div class="acc-row"><span>Tape width</span><input id="val-w" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
         <div class="acc-row"><span>Tape height</span><input id="val-h" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
-        <div class="acc-row"><span>Tape depth</span><input id="val-d" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
-      </div>
+              </div>
       <button id="btn-validate-add" class="primary slim">Record trial</button>
       <div id="val-table" class="val-table"></div>
       <p id="val-summary" class="hint"></p>
@@ -169,6 +168,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=11"></script>
+  <script type="module" src="js/app.js?v=12"></script>
 </body>
 </html>

@@ -285,3 +285,12 @@ button:active:not(:disabled) { transform: scale(0.98); }
   width: 160px; height: 160px; margin: 14px auto 0;
   background: var(--panel); border-radius: 14px; display: block;
 }
+
+/* ---------- reference size inputs ---------- */
+.ref-size { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.ref-size input {
+  font: inherit; font-size: 1rem; font-weight: 700;
+  width: 58px; text-align: right;
+  background: var(--bg); color: var(--text);
+  border: 1px solid #2a3442; border-radius: 8px; padding: 6px;
+}

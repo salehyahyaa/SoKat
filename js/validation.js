@@ -81,29 +81,29 @@ export function validatePaperQuad(pts, imgW, imgH) {
   const errors = [];
   const warnings = [];
   if (!pts || pts.length !== 4) {
-    return { ok: false, errors: [{ code: 'count', message: 'All 4 sheet corners are required.' }], warnings, metrics: {} };
+    return { ok: false, errors: [{ code: 'count', message: 'All 4 reference corners are required.' }], warnings, metrics: {} };
   }
   const diag = Math.hypot(imgW, imgH);
 
   pts.forEach((p, i) => {
     const m = Math.min(p.x, p.y, imgW - p.x, imgH - p.y);
     if (m < THRESHOLDS.borderHardPx) {
-      errors.push({ code: 'border', message: `Sheet corner ${i + 1} touches the photo edge — the whole sheet must be in frame.` });
+      errors.push({ code: 'border', message: `Reference corner ${i + 1} touches the photo edge — the whole reference must be in frame.` });
     }
   });
   for (let i = 0; i < 4; i++) {
     for (let j = i + 1; j < 4; j++) {
       if (dist(pts[i], pts[j]) < THRESHOLDS.minPointSepFrac * diag) {
-        errors.push({ code: 'duplicate', message: `Sheet corners ${i + 1} and ${j + 1} are almost on top of each other — re-place one.` });
+        errors.push({ code: 'duplicate', message: `Reference corners ${i + 1} and ${j + 1} are almost on top of each other — re-place one.` });
       }
     }
   }
   if (!isConvexQuad(pts)) {
-    errors.push({ code: 'crossed', message: 'The sheet corners cross over — tap them going around the sheet, one corner after the next.' });
+    errors.push({ code: 'crossed', message: 'The corners cross over — tap them going around the reference, one corner after the next.' });
   }
   const areaFrac = quadArea(pts) / (imgW * imgH);
   if (errors.length === 0 && areaFrac < THRESHOLDS.minPaperAreaFrac) {
-    errors.push({ code: 'paper-small', message: 'The sheet is too small in the photo — step closer so the sheet is clearly visible.' });
+    errors.push({ code: 'paper-small', message: 'The reference is too small in the photo — step closer so it\'s clearly visible.' });
   }
   return { ok: errors.length === 0, errors: dedupe(errors), warnings, metrics: { areaFrac } };
 }
@@ -143,12 +143,12 @@ export function paperPoseChecks(paperPts, imgW, imgH, { exifFocal = null, homogr
   metrics.focalVP = fVP;
   metrics.focalEXIF = exifFocal;
   if (fVP != null && (fVP < THRESHOLDS.focalRangeDiagMin * diag || fVP > THRESHOLDS.focalRangeDiagMax * diag)) {
-    warnings.push({ code: 'focal-implausible', message: 'The sheet\'s perspective looks unusual — check the corner taps' });
+    warnings.push({ code: 'focal-implausible', message: 'The reference\'s perspective looks unusual — check the corner taps' });
   }
   if (fVP != null && exifFocal) {
     metrics.focalDisagreePct = Math.abs(fVP - exifFocal) / exifFocal * 100;
     if (metrics.focalDisagreePct > 40) {
-      warnings.push({ code: 'focal-disagree', message: `Sheet perspective disagrees ${metrics.focalDisagreePct.toFixed(0)}% with the camera focal — corner taps may be off` });
+      warnings.push({ code: 'focal-disagree', message: `Reference perspective disagrees ${metrics.focalDisagreePct.toFixed(0)}% with the camera focal — corner taps may be off` });
     }
   }
 
@@ -180,7 +180,7 @@ export function paperPoseChecks(paperPts, imgW, imgH, { exifFocal = null, homogr
         a1 = [h1[0], h1[1], 0]; a2 = [h2[0], h2[1], 0];
       } else {
         metrics.unverified = true;
-        warnings.push({ code: 'sheet-unverified', message: 'No camera focal data and an angled view — the sheet\'s proportions can\'t be cross-checked' });
+        warnings.push({ code: 'sheet-unverified', message: 'No camera focal data and an angled view — the reference\'s proportions can\'t be cross-checked' });
       }
     }
     if (a1 && a2) {
@@ -189,12 +189,12 @@ export function paperPoseChecks(paperPts, imgW, imgH, { exifFocal = null, homogr
         metrics.orthoResidual = Math.abs((a1[0] * a2[0] + a1[1] * a2[1] + a1[2] * a2[2]) / (n1 * n2));
         metrics.normRatio = n1 / n2;
         if (metrics.orthoResidual > THRESHOLDS.orthoBlock) {
-          errors.push({ code: 'not-rectangle', message: 'The 4 taps don\'t behave like a flat rectangular sheet — is the paper flat and are the taps on its actual corners?' });
+          errors.push({ code: 'not-rectangle', message: 'The 4 taps don\'t behave like a flat rectangle — is the reference flat, and are the taps on its actual corners?' });
         } else if (metrics.orthoResidual > THRESHOLDS.orthoWarn) {
-          warnings.push({ code: 'not-rectangle', message: 'Sheet corners are only approximately rectangular' });
+          warnings.push({ code: 'not-rectangle', message: 'Reference corners are only approximately rectangular' });
         }
         if (metrics.normRatio < THRESHOLDS.normRatioWarn || metrics.normRatio > 1 / THRESHOLDS.normRatioWarn) {
-          warnings.push({ code: 'proportions', message: 'Sheet proportions look off — double-check the corner taps' });
+          warnings.push({ code: 'proportions', message: 'Reference proportions look off — double-check the corner taps' });
         }
       }
     }
@@ -240,7 +240,7 @@ export function validateEndpoints(pts, dim, valueIn, imgW, imgH, paperPts) {
   if (!Number.isFinite(valueIn) || valueIn < b.min || valueIn > b.max) {
     errors.push({
       code: 'implausible',
-      message: `Measured ${dim} of ${Number.isFinite(valueIn) ? valueIn.toFixed(1) : '—'}″ is outside anything plausible (${b.min}–${b.max}″) — the sheet corners or the endpoints are misplaced.`,
+      message: `Measured ${dim} of ${Number.isFinite(valueIn) ? valueIn.toFixed(1) : '—'}″ is outside anything plausible (${b.min}–${b.max}″) — the reference corners or the endpoints are misplaced.`,
     });
   } else if (valueIn < b.typicalMin || valueIn > b.typicalMax) {
     warnings.push({ code: 'atypical', message: `${dim} of ${valueIn.toFixed(0)}″ is outside the typical closet range (${b.typicalMin}–${b.typicalMax}″)` });
@@ -286,21 +286,21 @@ export function confidenceView({
 } = {}) {
   let score = 100;
   const reasons = [];
-  if (paperAreaFrac < 0.004) { score -= 15; reasons.push('sheet is small in the photo'); }
+  if (paperAreaFrac < 0.004) { score -= 15; reasons.push('reference is small in the photo'); }
   if (ortho != null) {
     const d = Math.min(25, ortho * 150);
-    if (d > 5) reasons.push('sheet only approximately rectangular');
+    if (d > 5) reasons.push('reference only approximately rectangular');
     score -= d;
   }
   {
     const ratioErr = Math.abs(Math.log(normRatio || 1));
     const d = Math.min(20, ratioErr * 80);
-    if (d > 5) reasons.push('sheet proportions look off');
+    if (d > 5) reasons.push('reference proportions look off');
     score -= d;
   }
   {
     const d = Math.min(25, Math.max(0, leverage - 3) * 2.5);
-    if (d > 6) reasons.push('endpoints far from the reference sheet');
+    if (d > 6) reasons.push('endpoints far from the reference');
     score -= d;
   }
   if (megapixels < 2) { score -= 10; reasons.push('low photo resolution'); }
