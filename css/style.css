@@ -223,3 +223,14 @@ button:active:not(:disabled) { transform: scale(0.98); }
 /* ---------- results: tap-to-correct dims ---------- */
 .dim-card { cursor: pointer; }
 .dim-edit { color: var(--muted); font-size: 0.62rem; margin-top: 4px; }
+
+/* ---------- welcome: one-time height chips ---------- */
+.chips { margin-bottom: 16px; }
+.chips-label { display: block; color: var(--muted); font-size: 0.8rem; margin-bottom: 8px; }
+.chips button {
+  padding: 8px 12px; margin-right: 6px;
+  font-size: 0.85rem; font-weight: 600;
+  background: var(--panel); color: var(--muted);
+  border-radius: 9px;
+}
+.chips button.active { background: rgba(0, 229, 160, 0.18); color: var(--accent); }

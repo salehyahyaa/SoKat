@@ -18,7 +18,7 @@ import { CornerPicker } from './picker.js';
 import { rectangleMetrology } from './metrology.js';
 import { ClosetModel } from './closet-model.js';
 import { EmptyClosetRenderer } from './renderer.js';
-import { buildEmptiedViews, BeforeAfterView } from './emptier.js';
+import { buildEmptiedViews, PhotoEraser } from './emptier.js';
 
 const RETAKE = Symbol('retake');
 const HOME = Symbol('home');
@@ -34,11 +34,16 @@ const LABELS = [
   'TOP-RIGHT of the back',
 ];
 
-// How high people typically hold a phone when photographing a room. The
-// camera's height above the floor comes out of the pose recovery in scene
-// units, so this one assumption sets the absolute scale with no user input.
-// Tapping a dimension on the results screen corrects it (and the others).
-const ASSUMED_PHONE_HEIGHT_IN = 57;
+// The camera's height above the floor comes out of the pose recovery in
+// scene units, so one assumption — how high the phone was held — sets the
+// absolute scale with no per-scan input. The optional one-time height
+// selection on the welcome screen sharpens that assumption; chest-held
+// phone sits roughly 8-9 inches below the top of the head.
+const DEFAULT_PHONE_HEIGHT_IN = 58;
+function phoneHeightIn() {
+  const h = parseFloat(localStorage.getItem('user-height-in'));
+  return Number.isFinite(h) && h > 0 ? h - 8.5 : DEFAULT_PHONE_HEIGHT_IN;
+}
 
 export class SpaceScanApp {
   constructor(doc = document) {
@@ -51,15 +56,33 @@ export class SpaceScanApp {
 
     this.$('btn-view-photo').addEventListener('click', () => this.setResultsView('photo'));
     this.$('btn-view-3d').addEventListener('click', () => this.setResultsView('3d'));
-    this.$('btn-erase').addEventListener('click', () => this.toggleErase());
+    this.$('btn-clear-all').addEventListener('click', () => {
+      if (this.compareView) this.withLoading('Removing objects…', 'Rebuilding the background', async () => this.compareView.clearAll(), 600);
+    });
     this.$('btn-erase-reset').addEventListener('click', () => {
       if (this.compareView) this.compareView.reset();
     });
     this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
     this.$('dims').addEventListener('click', (e) => this.onDimTap(e));
+    this.initHeightChips();
 
     this.showScreen('welcome');
+  }
+
+  // One-time, optional: knowing the user's height sharpens the auto-scale
+  // (the phone is assumed held ~8.5in below the top of the head).
+  initHeightChips() {
+    const bar = this.$('height-chips');
+    const saved = localStorage.getItem('user-height-in');
+    for (const chip of bar.querySelectorAll('button')) {
+      if (saved && chip.dataset.in === saved) chip.classList.add('active');
+      chip.addEventListener('click', () => {
+        localStorage.setItem('user-height-in', chip.dataset.in);
+        for (const c of bar.querySelectorAll('button')) c.classList.remove('active');
+        chip.classList.add('active');
+      });
+    }
   }
 
   async runGuarded(fn) {
@@ -208,9 +231,10 @@ export class SpaceScanApp {
       const photo = await this.capturePhoto(
         'One photo — the whole thing',
         'Photograph the space or object you want to measure.<br><br>'
-        + 'Step back so ONE photo shows <b>all of it</b>: the floor/base from '
-        + 'its front edge to the back, and the full height. Use the 0.5× '
-        + 'lens if it doesn\'t all fit.',
+        + '<b>Stand up</b> and hold the phone at <b>chest height</b> — that\'s '
+        + 'how the app knows the scale. Step back so ONE photo shows '
+        + '<b>all of it</b>: the floor from its front edge to the back, and '
+        + 'the full height. Use the 0.5× lens if it doesn\'t all fit.',
       );
       const pts = await this.pickPoints(photo, {
         title: 'Tap the 6 corners',
@@ -230,13 +254,14 @@ export class SpaceScanApp {
         const camHeightUnits = Math.abs(metro.C[2]);
         if (!(camHeightUnits > 1e-6)) throw new Error('Could not recover the camera position — retake the photo');
         return {
+          corners: pts,
           raw: {
             width: metro.distance(bl, br),
             depth: metro.distance(bl, fl),
             heightLeft: metro.wallHeight(bl, br, tl),
             heightRight: metro.wallHeight(bl, br, tr),
           },
-          scale: ASSUMED_PHONE_HEIGHT_IN / camHeightUnits,
+          scale: phoneHeightIn() / camHeightUnits,
           photo,
           wallColor: sampleWallColor(photo, backQuad),
           note: photo.focalPx
@@ -285,16 +310,17 @@ export class SpaceScanApp {
     if (this.$('scene-canvas').hidden === false) this.setResultsView('3d');
   }
 
-  showResults({ raw, scale, photo, wallColor, note }) {
+  showResults({ raw, scale, photo, wallColor, note, corners }) {
     this.current = { raw, scale, note, corrected: null };
     this.showScreen('results');
     this.resultsWallColor = wallColor;
 
     if (this.compareView) { this.compareView.destroy(); this.compareView = null; }
     if (photo) {
-      this.compareView = new BeforeAfterView(this.$('compare-canvas'), buildEmptiedViews(photo));
+      const views = buildEmptiedViews(photo);
+      const hull = (corners || []).map((p) => ({ x: p.x * views.scale, y: p.y * views.scale }));
+      this.compareView = new PhotoEraser(this.$('compare-canvas'), views, hull);
     }
-    this.$('btn-erase').classList.remove('active');
     this.renderDims();
     this.setResultsView(this.compareView ? 'photo' : '3d');
   }
@@ -318,17 +344,6 @@ export class SpaceScanApp {
     this.renderDims();
   }
 
-  // Erase mode: drag over any other object in the emptied photo to wipe it.
-  toggleErase() {
-    if (!this.compareView) return;
-    const on = !this.compareView.eraseMode;
-    this.compareView.setEraseMode(on);
-    this.$('btn-erase').classList.toggle('active', on);
-    this.$('view-hint').textContent = on
-      ? 'paint over an object and lift your finger — it disappears'
-      : 'slide the handle to compare original vs edited';
-  }
-
   // Toggle between the emptied-photo comparison and the 3D model. Views are
   // (re)laid out on entry because a hidden canvas has zero size.
   setResultsView(which) {
@@ -339,7 +354,7 @@ export class SpaceScanApp {
     this.$('scene-canvas').hidden = !!photoMode;
     this.$('erase-bar').hidden = !photoMode;
     if (photoMode) {
-      this.$('view-hint').textContent = 'tap Erase objects, then paint over anything to remove it';
+      this.$('view-hint').textContent = 'paint over any object and lift — it disappears';
       this.compareView.layout();
       this.compareView.render();
     } else {

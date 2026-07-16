@@ -1,26 +1,21 @@
 /**
- * Photo editing views for the results screen.
- *
- * buildEmptiedViews produces matched {original, emptied} display copies of
- * the photo. The "emptied" copy starts identical — nothing synthetic is
- * painted — and the user removes objects with the erase brush: a drag
- * selects the object, and on release the region is inpainted by diffusing
- * the surrounding real pixels inward, so the fill blends with the photo.
+ * Photo eraser for the results screen: the photo is shown as-is, and any
+ * drag paints a selection that gets inpainted on release — surrounding real
+ * texture is synthesized into the hole so the object disappears.
+ * clearAll() inpaints the whole tapped region (the space/object silhouette)
+ * in one shot. Nothing synthetic is ever painted except these fills.
  */
 
-const MAX_DIM = 1600; // display copies; full-res isn't needed on a phone screen
+const MAX_DIM = 1600; // display copy; full-res isn't needed on a phone screen
 
 export function buildEmptiedViews(photo) {
   const scale = Math.min(1, MAX_DIM / Math.max(photo.width, photo.height));
   const w = Math.max(1, Math.round(photo.width * scale));
   const h = Math.max(1, Math.round(photo.height * scale));
-
-  const original = document.createElement('canvas');
-  original.width = w; original.height = h;
-  original.getContext('2d').drawImage(photo, 0, 0, w, h);
-
-  const emptied = cloneCanvas(original);
-  return { original, emptied };
+  const emptied = document.createElement('canvas');
+  emptied.width = w; emptied.height = h;
+  emptied.getContext('2d').drawImage(photo, 0, 0, w, h);
+  return { emptied, scale };
 }
 
 function noisePattern(ctx) {
@@ -37,34 +32,25 @@ function noisePattern(ctx) {
   return ctx.createPattern(tile, 'repeat');
 }
 
-/**
- * BeforeAfterView — swipeable comparison of the original photo and the
- * emptied one. Drag anywhere: left of the divider shows the space as
- * photographed, right of it shows the contents digitally removed.
- *
- * Erase mode: dragging becomes a brush that wipes any other object out of
- * the emptied photo — each stamp is inpainted with the color sampled from a
- * ring around it, so the fill blends with its surroundings. reset() restores
- * the freshly-emptied state.
- */
-export class BeforeAfterView {
-  constructor(canvas, { original, emptied }) {
+export class PhotoEraser {
+  // views: {emptied, scale} from buildEmptiedViews. hull: the 6 tapped
+  // corners in DISPLAY-image coordinates (photo px * views.scale) — used by
+  // clearAll() to wipe the whole tapped region.
+  constructor(canvas, views, hull = []) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.original = original;
-    this.emptied = emptied;
-    this.pristine = cloneCanvas(emptied); // for reset()
-    this.pos = 0.5; // divider, fraction of image width
+    this.emptied = views.emptied;
+    this.pristine = cloneCanvas(views.emptied); // for reset()
+    this.hull = convexHull(hull);
     this.dpr = window.devicePixelRatio || 1;
     this.dragging = false;
-    this.eraseMode = false;
-    this.stroke = []; // image-coord points of the erase stroke being drawn
+    this.stroke = [];
 
     this._onDown = (e) => { this.dragging = true; this.canvas.setPointerCapture(e.pointerId); this.moveTo(e); };
     this._onMove = (e) => { if (this.dragging) this.moveTo(e); };
     this._onUp = () => {
       this.dragging = false;
-      if (this.eraseMode && this.stroke.length) {
+      if (this.stroke.length) {
         this.applyErase(this.stroke);
         this.stroke = [];
         this.render();
@@ -95,11 +81,11 @@ export class BeforeAfterView {
     this.canvas.width = Math.round(rect.width * this.dpr);
     this.canvas.height = Math.round(rect.height * this.dpr);
     const s = Math.min(
-      this.canvas.width / this.original.width,
-      this.canvas.height / this.original.height,
+      this.canvas.width / this.emptied.width,
+      this.canvas.height / this.emptied.height,
     );
-    this.drawW = this.original.width * s;
-    this.drawH = this.original.height * s;
+    this.drawW = this.emptied.width * s;
+    this.drawH = this.emptied.height * s;
     this.drawX = (this.canvas.width - this.drawW) / 2;
     this.drawY = (this.canvas.height - this.drawH) / 2;
   }
@@ -107,23 +93,11 @@ export class BeforeAfterView {
   moveTo(e) {
     const rect = this.canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * this.dpr;
-    if (this.eraseMode) {
-      const y = (e.clientY - rect.top) * this.dpr;
-      this.stroke.push({
-        x: ((x - this.drawX) / this.drawW) * this.emptied.width,
-        y: ((y - this.drawY) / this.drawH) * this.emptied.height,
-      });
-    } else {
-      this.pos = Math.min(1, Math.max(0, (x - this.drawX) / this.drawW));
-    }
-    this.render();
-  }
-
-  // ------------------------------------------------------------- erase mode
-
-  setEraseMode(on) {
-    this.eraseMode = on;
-    if (on) this.pos = 0; // show the emptied image full-width while erasing
+    const y = (e.clientY - rect.top) * this.dpr;
+    this.stroke.push({
+      x: ((x - this.drawX) / this.drawW) * this.emptied.width,
+      y: ((y - this.drawY) / this.drawH) * this.emptied.height,
+    });
     this.render();
   }
 
@@ -136,28 +110,66 @@ export class BeforeAfterView {
     return Math.max(14, Math.max(this.emptied.width, this.emptied.height) * 0.045);
   }
 
-  // Real object removal: rasterize the stroke into a mask, then fill the
-  // masked region by diffusing the surrounding photo pixels inward (Jacobi
-  // iterations on a downscaled patch), composite back through a feathered
-  // mask and re-grain — the object disappears into its surroundings.
+  // Wipe the whole tapped region (silhouette of the space/object) at once.
+  clearAll() {
+    if (this.hull.length < 3) return;
+    const xs = this.hull.map((p) => p.x);
+    const ys = this.hull.map((p) => p.y);
+    const pad = this.brushRadius();
+    this.inpaint(
+      Math.min(...xs) - pad, Math.min(...ys) - pad,
+      Math.max(...xs) + pad, Math.max(...ys) + pad,
+      (mctx, S, offX, offY) => {
+        mctx.fillStyle = '#fff';
+        mctx.beginPath();
+        this.hull.forEach((p, i) => {
+          const x = (p.x - offX) * S; const y = (p.y - offY) * S;
+          if (i === 0) mctx.moveTo(x, y); else mctx.lineTo(x, y);
+        });
+        mctx.closePath();
+        mctx.fill();
+        // pad the silhouette a touch so object edges don't survive
+        mctx.lineWidth = pad * S;
+        mctx.strokeStyle = '#fff';
+        mctx.stroke();
+      },
+      320,
+    );
+    this.render();
+  }
+
   applyErase(stroke) {
-    const img = this.emptied;
     const R = this.brushRadius();
     let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
     for (const p of stroke) {
       minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
       minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
     }
-    minX = Math.max(0, Math.floor(minX - R * 2));
-    minY = Math.max(0, Math.floor(minY - R * 2));
-    maxX = Math.min(img.width, Math.ceil(maxX + R * 2));
-    maxY = Math.min(img.height, Math.ceil(maxY + R * 2));
+    this.inpaint(minX - R * 2, minY - R * 2, maxX + R * 2, maxY + R * 2, (mctx, S, offX, offY) => {
+      for (const p of stroke) {
+        const cx = (p.x - offX) * S; const cy = (p.y - offY) * S; const r = R * S;
+        const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g.addColorStop(0, 'rgba(255,255,255,1)');
+        g.addColorStop(0.75, 'rgba(255,255,255,1)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        mctx.fillStyle = g;
+        mctx.beginPath(); mctx.arc(cx, cy, r, 0, Math.PI * 2); mctx.fill();
+      }
+    });
+  }
+
+  // Shared inpaint machinery: diffusion base + exemplar texture synthesis,
+  // composited back through the feathered mask at full display resolution.
+  inpaint(minX, minY, maxX, maxY, paintMask, maxWork = 200) {
+    const img = this.emptied;
+    minX = Math.max(0, Math.floor(minX));
+    minY = Math.max(0, Math.floor(minY));
+    maxX = Math.min(img.width, Math.ceil(maxX));
+    maxY = Math.min(img.height, Math.ceil(maxY));
     const bw = maxX - minX; const bh = maxY - minY;
     if (bw < 4 || bh < 4) return;
 
-    // Work at reduced resolution — diffusion converges fast and the smooth
-    // result upscales cleanly.
-    const S = Math.min(1, 200 / Math.max(bw, bh));
+    const S = Math.min(1, maxWork / Math.max(bw, bh));
     const sw = Math.max(4, Math.round(bw * S));
     const sh = Math.max(4, Math.round(bh * S));
 
@@ -166,28 +178,16 @@ export class BeforeAfterView {
     const sctx = small.getContext('2d');
     sctx.drawImage(img, minX, minY, bw, bh, 0, 0, sw, sh);
 
-    // Feathered stroke mask (soft-edged circles along the stroke).
     const maskC = document.createElement('canvas');
     maskC.width = sw; maskC.height = sh;
-    const mctx = maskC.getContext('2d');
-    for (const p of stroke) {
-      const cx = (p.x - minX) * S; const cy = (p.y - minY) * S; const r = R * S;
-      const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      g.addColorStop(0, 'rgba(255,255,255,1)');
-      g.addColorStop(0.75, 'rgba(255,255,255,1)');
-      g.addColorStop(1, 'rgba(255,255,255,0)');
-      mctx.fillStyle = g;
-      mctx.beginPath(); mctx.arc(cx, cy, r, 0, Math.PI * 2); mctx.fill();
-    }
+    paintMask(maskC.getContext('2d'), S, minX, minY);
 
     const cd = sctx.getImageData(0, 0, sw, sh);
-    const md = mctx.getImageData(0, 0, sw, sh);
+    const md = maskC.getContext('2d').getImageData(0, 0, sw, sh);
     const n = sw * sh;
     const mask = new Uint8Array(n);
     for (let i = 0; i < n; i++) mask[i] = md.data[i * 4 + 3] > 100 ? 1 : 0;
 
-    // Seed masked pixels with the average of the unmasked surroundings so
-    // diffusion starts near the answer.
     let ar = 0; let ag = 0; let ab = 0; let an = 0;
     for (let i = 0; i < n; i++) {
       if (!mask[i]) { ar += cd.data[i * 4]; ag += cd.data[i * 4 + 1]; ab += cd.data[i * 4 + 2]; an++; }
@@ -225,15 +225,9 @@ export class BeforeAfterView {
       cd.data[i * 4 + 2] = a[i * 3 + 2];
     }
 
-    // Exemplar pass: re-texture the smooth diffusion base by stamping real
-    // patches copied from the unmasked surroundings — texture continues
-    // through the hole instead of turning into a smudge.
     exemplarFill(cd.data, mask, sw, sh);
 
     sctx.putImageData(cd, 0, 0);
-
-    // Keep only the (feathered) masked part of the fill, re-grain it so it
-    // matches photo texture, then composite back at full resolution.
     sctx.globalCompositeOperation = 'destination-in';
     sctx.drawImage(maskC, 0, 0);
     sctx.globalCompositeOperation = 'source-atop';
@@ -252,78 +246,20 @@ export class BeforeAfterView {
   render() {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(this.original, this.drawX, this.drawY, this.drawW, this.drawH);
-
-    // Emptied side, clipped to the right of the divider.
-    const split = this.drawX + this.drawW * this.pos;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(split, this.drawY, this.drawX + this.drawW - split, this.drawH);
-    ctx.clip();
     ctx.drawImage(this.emptied, this.drawX, this.drawY, this.drawW, this.drawH);
-    ctx.restore();
-
-    if (this.eraseMode) {
-      // Live preview of the selection being painted.
-      if (this.stroke.length) {
-        const r = this.brushRadius() * (this.drawW / this.emptied.width);
-        this.ctx.save();
-        this.ctx.fillStyle = 'rgba(0, 229, 160, 0.30)';
-        for (const p of this.stroke) {
-          const cx = this.drawX + (p.x / this.emptied.width) * this.drawW;
-          const cy = this.drawY + (p.y / this.emptied.height) * this.drawH;
-          this.ctx.beginPath();
-          this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          this.ctx.fill();
-        }
-        this.ctx.restore();
+    if (this.stroke.length) {
+      const r = this.brushRadius() * (this.drawW / this.emptied.width);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 229, 160, 0.30)';
+      for (const p of this.stroke) {
+        const cx = this.drawX + (p.x / this.emptied.width) * this.drawW;
+        const cy = this.drawY + (p.y / this.emptied.height) * this.drawH;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
       }
-      this.drawTag('ERASE — paint over an object, lift to remove it', this.drawX + 8 * this.dpr, false);
-    } else {
-      this.drawDivider(split);
-      this.drawTag('ORIGINAL', this.drawX + 8 * this.dpr, false);
-      this.drawTag('EDITED', this.drawX + this.drawW - 8 * this.dpr, true);
+      ctx.restore();
     }
-  }
-
-  drawDivider(x) {
-    const { ctx, dpr } = this;
-    const yTop = this.drawY;
-    const yBot = this.drawY + this.drawH;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2 * dpr;
-    ctx.beginPath();
-    ctx.moveTo(x, yTop); ctx.lineTo(x, yBot);
-    ctx.stroke();
-
-    const cy = yTop + this.drawH / 2;
-    const r = 17 * dpr;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(x, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#0a0c10';
-    ctx.lineWidth = 2.5 * dpr;
-    ctx.beginPath(); // ◄ ► arrows
-    ctx.moveTo(x - r * 0.25, cy - r * 0.35); ctx.lineTo(x - r * 0.55, cy); ctx.lineTo(x - r * 0.25, cy + r * 0.35);
-    ctx.moveTo(x + r * 0.25, cy - r * 0.35); ctx.lineTo(x + r * 0.55, cy); ctx.lineTo(x + r * 0.25, cy + r * 0.35);
-    ctx.stroke();
-  }
-
-  drawTag(text, x, alignRight) {
-    const { ctx, dpr } = this;
-    ctx.save();
-    ctx.font = `bold ${10 * dpr}px -apple-system, sans-serif`;
-    const tw = ctx.measureText(text).width;
-    const pad = 6 * dpr;
-    const bx = alignRight ? x - tw - pad * 2 : x;
-    const by = this.drawY + 8 * dpr;
-    ctx.fillStyle = 'rgba(10,12,16,0.72)';
-    ctx.fillRect(bx, by, tw + pad * 2, 20 * dpr);
-    ctx.fillStyle = alignRight ? '#00e5a0' : '#ffffff';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, bx + pad, by + 10 * dpr);
-    ctx.restore();
   }
 }
 
@@ -332,6 +268,25 @@ function cloneCanvas(src) {
   c.width = src.width; c.height = src.height;
   c.getContext('2d').drawImage(src, 0, 0);
   return c;
+}
+
+// Convex hull (monotone chain) — the silhouette of the tapped corners.
+function convexHull(pts) {
+  if (pts.length < 3) return pts.slice();
+  const p = [...pts].sort((u, v) => u.x - v.x || u.y - v.y);
+  const cross = (o, a2, b2) => (a2.x - o.x) * (b2.y - o.y) - (a2.y - o.y) * (b2.x - o.x);
+  const lower = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
 }
 
 // Exemplar-based texture synthesis over an inpaint mask (data: RGBA bytes).

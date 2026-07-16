@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — measure any space with your iPhone</title>
-  <link rel="stylesheet" href="css/style.css?v=7">
+  <link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
   <main id="app">
@@ -22,6 +22,13 @@
         <li><b>Tap its 6 corners</b>.</li>
         <li><b>Enter one length you know</b> (like the ceiling height) — get its dimensions, a 3D model, and an eraser to remove objects from the photo.</li>
       </ol>
+      <div id="height-chips" class="chips">
+        <span class="chips-label">Your height (once — sharpens auto-scale):</span>
+        <button data-in="62">~5′2″</button>
+        <button data-in="67">~5′7″</button>
+        <button data-in="72">~6′0″</button>
+        <button data-in="76">~6′4″</button>
+      </div>
       <div class="stack">
         <button id="btn-start" class="primary">Scan — 1 photo</button>
       </div>
@@ -72,10 +79,10 @@
         <canvas id="scene-canvas" hidden></canvas>
       </div>
       <div id="erase-bar">
-        <button id="btn-erase" class="seg-btn">🧽 Erase objects</button>
+        <button id="btn-clear-all" class="seg-btn">🧹 Remove all objects</button>
         <button id="btn-erase-reset" class="seg-btn">↺ Reset</button>
       </div>
-      <p class="hint" id="view-hint">tap Erase objects, then paint over anything to remove it</p>
+      <p class="hint" id="view-hint">paint over any object and lift — it disappears</p>
       <p id="diagnostics"></p>
       <div class="bar buttons">
         <button id="btn-restart" class="secondary">Scan again</button>
@@ -95,6 +102,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=7"></script>
+  <script type="module" src="js/app.js?v=8"></script>
 </body>
 </html>
