@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — closet measurement</title>
-  <link rel="stylesheet" href="css/style.css?v=13">
+  <link rel="stylesheet" href="css/style.css?v=14">
 </head>
 <body>
   <main id="app">
@@ -126,29 +126,8 @@
       <p id="result-warnings" class="hint warn"></p>
       <pre id="diag-panel" hidden></pre>
       <div class="bar buttons">
-        <button id="btn-restart" class="secondary">Rescan</button>
         <button id="btn-diagnostics" class="secondary">Diagnostics</button>
-        <button id="btn-validate" class="primary">Validation</button>
-      </div>
-    </section>
-
-    <!-- Validation mode -->
-    <section id="screen-validate" class="screen">
-      <header class="bar"><h2>Validation — app vs tape</h2></header>
-      <div class="acc-grid">
-        <div class="acc-row"><span>Tape width</span><input id="val-w" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
-        <div class="acc-row"><span>Tape height</span><input id="val-h" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
-              </div>
-      <button id="btn-validate-add" class="primary slim">Record trial</button>
-      <div id="val-table" class="val-table"></div>
-      <p id="val-summary" class="hint"></p>
-      <div class="stack push-down">
-        <div class="row-buttons">
-          <button id="btn-export-json" class="secondary">JSON</button>
-          <button id="btn-export-csv" class="secondary">CSV</button>
-          <button id="btn-validate-clear" class="secondary">Clear</button>
-        </div>
-        <button id="btn-validate-back" class="secondary">Back to results</button>
+        <button id="btn-restart" class="primary">Scan again</button>
       </div>
     </section>
 
@@ -163,6 +142,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=13"></script>
+  <script type="module" src="js/app.js?v=14"></script>
 </body>
 </html>

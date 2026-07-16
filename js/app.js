@@ -60,16 +60,6 @@ export class SpaceScanApp {
       const p = this.$('diag-panel');
       p.hidden = !p.hidden;
     });
-    this.$('btn-validate').addEventListener('click', () => this.openValidation());
-    this.$('btn-validate-back').addEventListener('click', () => this.showScreen('results'));
-    this.$('btn-validate-add').addEventListener('click', () => this.addValidationTrial());
-    this.$('btn-validate-clear').addEventListener('click', () => {
-      localStorage.removeItem('validation-trials');
-      this.renderValidation();
-    });
-    this.$('btn-export-json').addEventListener('click', () => this.exportTrials('json'));
-    this.$('btn-export-csv').addEventListener('click', () => this.exportTrials('csv'));
-
     this.showScreen('welcome');
   }
 
@@ -465,7 +455,6 @@ export class SpaceScanApp {
       `confidence: ${o.conf.score}/100`,
       '',
       '1/16″ formatting is display resolution, not measured accuracy.',
-      'Accuracy evidence lives in Validation mode (app vs tape measure).',
     ].join('\n');
     this.$('diag-panel').hidden = true;
   }
@@ -491,95 +480,6 @@ export class SpaceScanApp {
     this.renderDims();
   }
 
-  // ------------------------------------------------------- validation mode
-
-  openValidation() {
-    this.showScreen('validate');
-    for (const id of ['val-w', 'val-h']) this.$(id).value = '';
-    this.renderValidation();
-  }
-
-  trials() {
-    try { return JSON.parse(localStorage.getItem('validation-trials')) || []; } catch { return []; }
-  }
-
-  addValidationTrial() {
-    const measured = {
-      width: parseFloat(this.$('val-w').value),
-      height: parseFloat(this.$('val-h').value),
-    };
-    if (!Object.values(measured).every((v) => Number.isFinite(v) && v > 0)) {
-      alert('Enter both tape-measured dimensions in inches.');
-      return;
-    }
-    const app = this.current.dims;
-    const trial = { at: new Date().toISOString(), confidence: this.current.conf.level, dims: {} };
-    for (const d of ['width', 'height']) {
-      const err = app[d] - measured[d];
-      trial.dims[d] = {
-        app: round3(app[d]),
-        measured: measured[d],
-        errorIn: round3(err),
-        errorPct: round3(Math.abs(err) / measured[d] * 100),
-      };
-    }
-    const all = this.trials();
-    all.push(trial);
-    localStorage.setItem('validation-trials', JSON.stringify(all));
-    this.renderValidation();
-  }
-
-  renderValidation() {
-    const all = this.trials();
-    const table = this.$('val-table');
-    if (all.length === 0) {
-      table.innerHTML = '<p class="hint">No trials recorded yet.</p>';
-      this.$('val-summary').textContent = '';
-      return;
-    }
-    const rows = all.map((t, i) => {
-      const cells = ['width', 'height'].map((d) => {
-        const c = t.dims[d];
-        return `<td>${c.app}″ / ${c.measured}″<br><span class="err">${c.errorIn >= 0 ? '+' : ''}${c.errorIn}″ (${c.errorPct}%)</span></td>`;
-      }).join('');
-      return `<tr><td>#${i + 1}<br><span class="err">${t.at.slice(0, 10)}</span></td>${cells}</tr>`;
-    }).join('');
-    table.innerHTML = `<table><thead><tr><th>trial</th><th>W app/tape</th><th>H app/tape</th></tr></thead><tbody>${rows}</tbody></table>`;
-
-    const errs = all.flatMap((t) => Object.values(t.dims).map((c) => Math.abs(c.errorIn)));
-    const mae = errs.reduce((a, b) => a + b, 0) / errs.length;
-    const maxErr = Math.max(...errs);
-    const sixteenthMet = errs.every((e) => e <= 0.0625);
-    this.$('val-summary').innerHTML =
-      `Mean absolute error: <b>${mae.toFixed(3)}″</b> · Max error: <b>${maxErr.toFixed(3)}″</b> · ${errs.length} measurements, ${all.length} trial(s)<br>`
-      + (sixteenthMet
-        ? '<span class="ok">Every recorded error is within the 1/16″ (0.0625″) target.</span>'
-        : `<span class="warn">1/16″ (0.0625″) target NOT met (max ${maxErr.toFixed(3)}″).</span>`);
-  }
-
-  exportTrials(kind) {
-    const all = this.trials();
-    if (all.length === 0) { alert('No trials to export yet.'); return; }
-    let blob;
-    let name;
-    if (kind === 'json') {
-      blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
-      name = 'spacescan-validation.json';
-    } else {
-      const header = 'trial,timestamp,confidence,dimension,app_in,measured_in,error_in,error_pct';
-      const lines = all.flatMap((t, i) => ['width', 'height'].map((d) => {
-        const c = t.dims[d];
-        return `${i + 1},${t.at},${t.confidence},${d},${c.app},${c.measured},${c.errorIn},${c.errorPct}`;
-      }));
-      blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
-      name = 'spacescan-validation.csv';
-    }
-    const a = this.doc.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  }
 }
 
 // --------------------------------------------------------------- helpers
