@@ -1,18 +1,19 @@
 /**
  * SpaceScanApp — orchestrator. Owns the screen state machine and wires the
- * capture → calibrate → measure → render pipeline together.
+ * capture → measure → scale → render pipeline together.
  *
- * The whole scan is ONE photo and ONE tapping session:
- *   drop a letter-size sheet flat on the floor of the space → photograph the
- *   whole space → tap 10 points (4 paper corners, then 6 space corners).
- *   Width & depth come straight off the paper-calibrated floor plane; height is recovered
- *   from the camera pose (single-view metrology, EXIF focal when available).
- *   Results: dimensions, a before/after "contents removed" photo, and a
- *   rotatable 3D model of the empty space.
+ * The whole scan is ONE photo, 6 corner taps, and ONE typed number:
+ *   photograph the space/object → tap its 6 corners (floor footprint
+ *   assumed rectangular + the two top corners) → rectangle metrology
+ *   recovers every dimension ratio from the perspective (EXIF focal when
+ *   available) → the user enters ONE length they know (e.g. ceiling height)
+ *   which sets the absolute scale for all three dimensions.
+ *   Results: dimensions, a before/after "contents removed" photo with an
+ *   object-eraser brush, and a rotatable 3D model of the empty space.
  */
 import { CameraCapture } from './camera.js';
 import { CornerPicker } from './picker.js';
-import { SingleViewMetrology } from './metrology.js';
+import { rectangleMetrology } from './metrology.js';
 import { ClosetModel } from './closet-model.js';
 import { EmptyClosetRenderer } from './renderer.js';
 import { buildEmptiedViews, BeforeAfterView } from './emptier.js';
@@ -20,25 +21,15 @@ import { buildEmptiedViews, BeforeAfterView } from './emptier.js';
 const RETAKE = Symbol('retake');
 const HOME = Symbol('home');
 
-const PAPER_COLOR = '#4da3ff';
 const TARGET_COLOR = '#00e5a0';
 
-// One session: paper first (blue), then the space's corners (green).
 const LABELS = [
-  'paper corner — start of a LONG (11″) edge',
-  'paper corner — other end of that LONG edge',
-  'paper corner — continue around the sheet',
-  'paper corner — last one',
-  'floor BACK-LEFT corner (floor meets back wall)',
+  'floor BACK-LEFT corner (floor meets the back)',
   'floor BACK-RIGHT corner',
   'floor FRONT-LEFT corner (front edge)',
   'floor FRONT-RIGHT corner',
-  'TOP-LEFT of the back wall (at the ceiling)',
-  'TOP-RIGHT of the back wall (at the ceiling)',
-];
-const POINT_COLORS = [
-  PAPER_COLOR, PAPER_COLOR, PAPER_COLOR, PAPER_COLOR,
-  TARGET_COLOR, TARGET_COLOR, TARGET_COLOR, TARGET_COLOR, TARGET_COLOR, TARGET_COLOR,
+  'TOP-LEFT corner (top of the back)',
+  'TOP-RIGHT corner',
 ];
 
 export class SpaceScanApp {
@@ -194,10 +185,11 @@ export class SpaceScanApp {
 
   async runScan() {
     const scan = await this.stepScan();
+    const model = await this.askScale(scan.raw);
     await this.withLoading(
       'Emptying the space…',
       'Removing contents and calculating dimensions',
-      async () => this.showResults(scan),
+      async () => this.showResults({ ...scan, model }),
       1400,
     );
   }
@@ -205,46 +197,90 @@ export class SpaceScanApp {
   async stepScan() {
     while (true) {
       const photo = await this.capturePhoto(
-        'One photo — the whole space',
-        'Drop the letter-size sheet <b>flat on the floor</b> of the space — '
-        + 'no tape needed.<br><br>Step back so ONE photo shows the '
-        + '<b>whole space</b>: the floor from its front edge to the back '
-        + 'wall, and the back wall up to the ceiling. Use the 0.5× lens if '
-        + 'it doesn\'t all fit.',
+        'One photo — the whole thing',
+        'Photograph the space or object you want to measure.<br><br>'
+        + 'Step back so ONE photo shows <b>all of it</b>: the floor/base from '
+        + 'its front edge to the back, and the full height. Use the 0.5× '
+        + 'lens if it doesn\'t all fit.',
       );
       const pts = await this.pickPoints(photo, {
-        title: 'Tap the 10 points',
+        title: 'Tap the 6 corners',
         labels: LABELS,
-        pointColors: POINT_COLORS,
       });
       if (pts === RETAKE) continue;
 
       try {
-        const metro = new SingleViewMetrology(pts.slice(0, 4), photo.width, photo.height, {
+        const [bl, br, fl, fr, tl, tr] = pts;
+        const metro = rectangleMetrology([bl, br, fr, fl], photo.width, photo.height, {
           focalPx: photo.focalPx || null,
         });
-        const [, , , , bl, br, fl, fr, tl, tr] = pts;
-        const backQuad = [tl, tr, br, bl]; // TL TR BR BL of the back wall
+        const backQuad = [tl, tr, br, bl]; // TL TR BR BL of the back face
         return {
-          model: new ClosetModel({
-            widthTop: metro.distance(bl, br),
-            widthBottom: metro.distance(fl, fr),
+          // Every ratio is right; the absolute scale comes from askScale().
+          raw: {
+            width: metro.distance(bl, br),
+            depth: metro.distance(bl, fl),
             heightLeft: metro.wallHeight(bl, br, tl),
             heightRight: metro.wallHeight(bl, br, tr),
-            depthLeft: metro.distance(bl, fl),
-            depthRight: metro.distance(br, fr),
-          }),
+          },
           photo,
           backQuad,
           wallColor: sampleWallColor(photo, backQuad),
-          note: metro.focalSource === 'exif'
-            ? 'One-photo scan · typical accuracy ±1/2″ (height ±1½″)'
-            : 'One-photo scan (no camera EXIF — height is approximate)',
+          note: photo.focalPx
+            ? 'One-photo scan, scaled from the length you entered'
+            : 'One-photo scan (no camera EXIF — accuracy reduced), scaled from the length you entered',
         };
       } catch (err) {
         alert(`${err.message || err}`);
       }
     }
+  }
+
+  // The one number the math cannot know from pixels: a real length. The user
+  // enters whichever dimension they know (ceiling height is the usual one)
+  // and every other dimension scales from it.
+  askScale(raw) {
+    this.showScreen('scale');
+    const height = (raw.heightLeft + raw.heightRight) / 2;
+    const rows = [
+      { id: 'scale-h', dim: 'height', raw: height },
+      { id: 'scale-w', dim: 'width', raw: raw.width },
+      { id: 'scale-d', dim: 'depth', raw: raw.depth },
+    ];
+    const btn = this.$('btn-scale-done');
+    const inputs = rows.map((r) => this.$(r.id));
+    inputs.forEach((el) => { el.value = ''; });
+
+    return new Promise((resolve) => {
+      const firstFilled = () => {
+        for (let i = 0; i < rows.length; i++) {
+          const v = parseFloat(inputs[i].value);
+          if (Number.isFinite(v) && v > 0) return { ...rows[i], value: v };
+        }
+        return null;
+      };
+      const update = () => { btn.disabled = !firstFilled(); };
+      const onDone = () => {
+        const known = firstFilled();
+        if (!known) return;
+        cleanup();
+        const scale = known.value / known.raw;
+        resolve(new ClosetModel({
+          widthTop: raw.width * scale,
+          widthBottom: raw.width * scale,
+          heightLeft: raw.heightLeft * scale,
+          heightRight: raw.heightRight * scale,
+          depth: raw.depth * scale,
+        }));
+      };
+      const cleanup = () => {
+        btn.removeEventListener('click', onDone);
+        inputs.forEach((el) => el.removeEventListener('input', update));
+      };
+      btn.addEventListener('click', onDone);
+      inputs.forEach((el) => el.addEventListener('input', update));
+      update();
+    });
   }
 
   // --------------------------------------------------------------- results

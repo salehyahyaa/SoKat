@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SingleViewMetrology } from '../js/metrology.js';
+import { SingleViewMetrology, rectangleMetrology } from '../js/metrology.js';
 import { PinholeCamera, paperOnFloor, seededRandom, jitter, percentile } from './helpers.js';
 
 // World frame: y up, floor at y=0. The closet's back wall is at z=0, opening
@@ -105,4 +105,30 @@ test('quick-scan noise envelope: W/D ≤ ~1/2", H ≤ ~2" with EXIF focal', () =
   assert.ok(percentile(hErr, 95) < 2.5, `height p95 (exif) ${percentile(hErr, 95).toFixed(3)}"`);
   // Fallback path is usable but visibly worse — the UI labels it approximate.
   assert.ok(percentile(hErrNoExif, 95) < 15, `height p95 (recovered f) ${percentile(hErrNoExif, 95).toFixed(3)}"`);
+});
+
+// -------------------------------------------------- no-reference rectangle
+
+test('rectangle metrology: ratios exact, one known length scales everything', () => {
+  const s = scene({});
+  const cycle = [s.backLeft, s.backRight, s.frontRight, s.frontLeft];
+  for (const focalPx of [2900, null]) { // EXIF path and recovered path
+    const m = rectangleMetrology(cycle, IMG_W, IMG_H, { focalPx });
+    const wU = m.distance(s.backLeft, s.backRight);
+    const dU = m.distance(s.backLeft, s.frontLeft);
+    const hU = m.wallHeight(s.backLeft, s.backRight, s.topLeft);
+    // ratios must match ground truth exactly
+    assert.ok(Math.abs(wU / dU - s.truth.W / s.truth.D) < 1e-6, `W/D ${wU / dU}`);
+    assert.ok(Math.abs(hU / dU - s.truth.H / s.truth.D) < 1e-6, `H/D ${hU / dU}`);
+    // one known length (the height) makes all dims absolute
+    const scale = s.truth.H / hU;
+    assert.ok(Math.abs(wU * scale - s.truth.W) < 1e-6, `W ${wU * scale}`);
+    assert.ok(Math.abs(dU * scale - s.truth.D) < 1e-6, `D ${dU * scale}`);
+  }
+});
+
+test('rectangle metrology: recovered focal matches the camera', () => {
+  const s = scene({});
+  const m = rectangleMetrology([s.backLeft, s.backRight, s.frontRight, s.frontLeft], IMG_W, IMG_H);
+  assert.ok(Math.abs(m.f - 2900) / 2900 < 1e-6, `f=${m.f}`);
 });

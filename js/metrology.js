@@ -151,6 +151,60 @@ export class SingleViewMetrology {
   toWorld(px) { return this.plane.toWorld(px); }
 }
 
+/**
+ * rectangleMetrology — the no-reference variant. The floor footprint the
+ * user taps is assumed to be a physical rectangle (unknown size). With the
+ * camera's focal length (EXIF, or recovered from the rectangle's vanishing-
+ * point orthogonality), the rectangle's aspect ratio falls out of the
+ * homography decomposition — so every measurement is correct UP TO ONE
+ * SCALE FACTOR. The caller sets absolute scale from a single user-known
+ * length (e.g. ceiling height).
+ *
+ * cornersPx: floor rectangle in cycle order [backL, backR, frontR, frontL].
+ * Returns a SingleViewMetrology whose unit is "one depth" (D = 1).
+ */
+export function rectangleMetrology(cornersPx, imageW, imageH, { focalPx = null } = {}) {
+  const cx = imageW / 2;
+  const cy = imageH / 2;
+  const world = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ];
+  const Hpi = Homography.solve(world, cornersPx).m;
+  const h1 = [Hpi[0][0], Hpi[1][0], Hpi[2][0]];
+  const h2 = [Hpi[0][1], Hpi[1][1], Hpi[2][1]];
+
+  let f = focalPx;
+  if (!f) {
+    // Only the orthogonality constraint holds for a non-square rectangle.
+    const d1 = [h1[0] - h1[2] * cx, h1[1] - h1[2] * cy, h1[2]];
+    const d2 = [h2[0] - h2[2] * cx, h2[1] - h2[2] * cy, h2[2]];
+    const den = d1[2] * d2[2];
+    const f2 = Math.abs(den) > 1e-12 ? -(d1[0] * d2[0] + d1[1] * d2[1]) / den : NaN;
+    if (!(f2 > 0) || !Number.isFinite(f2)) {
+      throw new Error(
+        'Could not read the camera\'s focal length from this photo — retake '
+        + 'the photo from a natural standing angle',
+      );
+    }
+    f = Math.sqrt(f2);
+  }
+
+  // Aspect ratio W/D from the column norms of K^-1 H.
+  const ki = (h) => [(h[0] - h[2] * cx) / f, (h[1] - h[2] * cy) / f, h[2]];
+  const a1 = ki(h1);
+  const a2 = ki(h2);
+  const aspect = norm(a1) / norm(a2);
+  if (!Number.isFinite(aspect) || aspect <= 0) {
+    throw new Error('Corner taps look degenerate — re-tap the 4 floor corners');
+  }
+  return new SingleViewMetrology(cornersPx, imageW, imageH, {
+    focalPx: f, longIn: aspect, shortIn: 1,
+  });
+}
+
 function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 function norm(a) { return Math.sqrt(dot(a, a)); }
 function scale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }

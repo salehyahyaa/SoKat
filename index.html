@@ -18,9 +18,9 @@
         <p class="tagline">Measure any space with one photo — a closet, pantry, alcove, or room corner. See it emptied, with its dimensions.</p>
       </div>
       <ol class="how">
-        <li><b>Drop a letter-size sheet of paper</b> (8.5″ × 11″) flat on the floor of the space — no tape, it's the size reference.</li>
-        <li><b>Take one photo</b> showing the whole space: floor and back wall.</li>
-        <li><b>Tap 10 points</b> — get the space emptied, in 3D, with its dimensions.</li>
+        <li><b>Take one photo</b> of the space or object.</li>
+        <li><b>Tap its 6 corners</b>.</li>
+        <li><b>Enter one length you know</b> (like the ceiling height) — get it emptied, in 3D, with all its dimensions.</li>
       </ol>
       <div class="stack">
         <button id="btn-start" class="primary">Scan — 1 photo</button>
@@ -52,6 +52,25 @@
         <button id="btn-undo" class="secondary">Undo</button>
         <button id="btn-next" class="primary" disabled>Next</button>
       </footer>
+    </section>
+
+    <!-- Scale: the one number pixels can't provide -->
+    <section id="screen-scale" class="screen">
+      <header class="bar">
+        <h2>One last thing — set the scale</h2>
+      </header>
+      <p class="body-text">
+        The photo gives every <b>proportion</b>, but pixels can't know real-world
+        size. Enter <b>any ONE</b> length you know and the rest is calculated:
+      </p>
+      <div class="acc-grid">
+        <div class="acc-row"><span>Height (ceilings are often 96″)</span><input id="scale-h" type="number" inputmode="decimal" min="0" placeholder="e.g. 96"> ″</div>
+        <div class="acc-row"><span>or Width</span><input id="scale-w" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
+        <div class="acc-row"><span>or Depth</span><input id="scale-d" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
+      </div>
+      <div class="stack push-down">
+        <button id="btn-scale-done" class="primary" disabled>Show dimensions</button>
+      </div>
     </section>
 
     <!-- Results -->

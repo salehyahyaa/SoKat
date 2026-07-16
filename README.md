@@ -1,9 +1,10 @@
 # SpaceScan
 
-Measure any space with an iPhone — a closet, pantry, alcove, or room corner —
-in the browser, no app install. ONE photo, ten taps: the app digitally
-empties the space (with a brush to erase any other object), shows a clean
-rotatable 3D model, and displays the dimensions. Zero dependencies.
+Measure any space or object with an iPhone — a closet, pantry, alcove, a
+piece of furniture — in the browser, no app install. ONE photo, six corner
+taps, one typed length: the app digitally empties the space (with a brush to
+erase any other object), shows a clean rotatable 3D model, and displays all
+three dimensions. Zero dependencies.
 
 **Demo:** open the GitHub Pages URL on an iPhone in Safari. Everything runs
 on-device; there is no backend.
@@ -13,41 +14,21 @@ on-device; there is no backend.
 ## How it works
 
 An iPhone browser gets camera access but **not** LiDAR/ARKit (Apple exposes
-those only to native apps), so ClosetScan measures the way photogrammetry
-tools do: a **known-size reference** — a letter-size sheet of paper
-(8.500″ × 11.000″, manufactured to <1/64″ tolerance) placed in the closet —
-fixes the scale of the scene.
+those only to native apps), so SpaceScan measures with single-view metrology:
 
-Two modes:
+1. The user taps the 6 corners of the space/object (its floor footprint is
+   assumed rectangular, plus the two top corners).
+2. From the footprint's perspective distortion and the camera's focal length
+   (EXIF `FocalLengthIn35mmFilm`, or recovered from the rectangle's
+   vanishing-point orthogonality), the homography is decomposed into the
+   camera pose — giving every dimension **ratio** exactly
+   (`js/metrology.js`, proven in `tests/metrology.test.js`).
+3. Pixels alone can never provide absolute units, so the user enters **one**
+   length they know (typically ceiling height); all dimensions scale from it.
 
-- **Quick Scan (default)** — ONE photo, paper simply dropped flat on the
-  closet floor (no tape). Width & depth are measured directly on the
-  calibrated floor plane; height is recovered via single-view metrology:
-  the paper's homography is decomposed into the camera pose (Zhang's method,
-  EXIF focal length when available), and the tapped ceiling corners are
-  ray-cast onto the vertical back-wall plane. Measured lines extend and
-  recalculate LIVE as corners are dragged. Typical accuracy ±1/2″
-  (height ±1½″) — see `tests/metrology.test.js` for the noise envelope.
-- **Precision Scan** — the two-photo flow (paper taped to the back wall,
-  then on the floor). Every distance is measured ON a calibrated plane;
-  this is the mode that meets the **1/16″** target.
-
-Pipeline per photo:
-
-```
-camera photo (12 MP)
-  → user taps the paper's 4 corners (magnifier loupe → ~0.5 px precision)
-  → Homography: DLT solve, image plane ↔ physical plane (inches)
-  → user taps closet corners → real-world distances on that plane
-  → ClosetModel: paired-edge averaging + consistency diagnostics
-  → ClosetEmptier: contents digitally removed from the photo (before/after swipe)
-  → EmptyClosetRenderer: clean 3D interior at measured size, contents gone
-```
-
-In Precision Scan, width & height come from a back-wall photo; depth from a
-floor photo. An optional **refinement pass** (second photo, averaged) cuts
-random error by √2 — that is what carries large spans inside the 1/16″
-target (proven in `tests/noise.test.js`).
+The measurement pipeline (homography, plane measurement, pose recovery) is
+validated against a synthetic pinhole camera to <1e-6 relative error, plus a
+seeded tap-noise envelope suite.
 
 ## Project structure
 
