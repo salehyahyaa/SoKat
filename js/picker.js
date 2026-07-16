@@ -12,7 +12,14 @@
  */
 export class CornerPicker {
   // ghosts: previously placed point sets shown for context (not editable).
-  constructor(canvas, photo, { count, color = '#00e5a0', ghosts = [], onChange = null }) {
+  // segments: pairs of point indices to connect with a measured line;
+  // segmentLabel(i, j, ptI, ptJ) returns the live length text (or null).
+  // The line follows the finger while dragging, so measurements extend and
+  // recalculate live, like pulling a tape measure.
+  constructor(canvas, photo, {
+    count, color = '#00e5a0', ghosts = [], onChange = null,
+    segments = [], segmentLabel = null,
+  }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.photo = photo;
@@ -20,6 +27,8 @@ export class CornerPicker {
     this.color = color;
     this.ghosts = ghosts;
     this.onChange = onChange;
+    this.segments = segments;
+    this.segmentLabel = segmentLabel;
     this.points = [];
     this.dragIndex = -1;
     this.dpr = window.devicePixelRatio || 1;
@@ -102,21 +111,24 @@ export class CornerPicker {
     e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
     const pos = this.eventPos(e);
-    const grabRadius = 34 * this.dpr;
-    let nearest = -1;
-    let nearestDist = Infinity;
-    this.points.forEach((pt, i) => {
-      const c = this.imgToCanvas(pt);
-      const d = Math.hypot(c.x - pos.x, c.y - pos.y);
-      if (d < grabRadius && d < nearestDist) { nearest = i; nearestDist = d; }
-    });
-    if (nearest >= 0) {
-      this.dragIndex = nearest;
-    } else if (this.points.length < this.count) {
+    // While points remain to be placed, every tap places the next point —
+    // grabbing would make a small on-screen reference (paper far away)
+    // swallow the neighboring taps. Fine-tuning by grabbing happens once all
+    // points are down; Undo covers mistakes before that.
+    if (this.points.length < this.count) {
       this.points.push(this.canvasToImg(pos));
       this.dragIndex = this.points.length - 1;
     } else {
-      return;
+      const grabRadius = 34 * this.dpr;
+      let nearest = -1;
+      let nearestDist = Infinity;
+      this.points.forEach((pt, i) => {
+        const c = this.imgToCanvas(pt);
+        const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+        if (d < grabRadius && d < nearestDist) { nearest = i; nearestDist = d; }
+      });
+      if (nearest < 0) return;
+      this.dragIndex = nearest;
     }
     this.points[this.dragIndex] = this.canvasToImg(pos);
     this.render(pos);
@@ -145,9 +157,50 @@ export class CornerPicker {
     for (const ghost of this.ghosts) {
       ghost.points.forEach((pt, i) => this.drawMarker(pt, ghost.color, i + 1, true));
     }
+    this.drawSegments();
     this.points.forEach((pt, i) => this.drawMarker(pt, this.color, i + 1, false));
     if (this.dragIndex >= 0 && fingerPos) {
       this.drawLoupe(this.points[this.dragIndex], fingerPos);
+    }
+  }
+
+  // Measured lines between placed points. While a point is being dragged its
+  // lines follow the finger and the length labels recompute every frame.
+  drawSegments() {
+    const { ctx, dpr } = this;
+    for (const [i, j] of this.segments) {
+      const a = this.points[i];
+      const b = this.points[j];
+      if (!a || !b) continue;
+      const ca = this.imgToCanvas(a);
+      const cb = this.imgToCanvas(b);
+      ctx.save();
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.setLineDash([7 * dpr, 5 * dpr]);
+      ctx.beginPath();
+      ctx.moveTo(ca.x, ca.y);
+      ctx.lineTo(cb.x, cb.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      let label = null;
+      if (this.segmentLabel) {
+        try { label = this.segmentLabel(i, j, a, b); } catch { label = null; }
+      }
+      if (label) {
+        const mx = (ca.x + cb.x) / 2;
+        const my = (ca.y + cb.y) / 2;
+        ctx.font = `bold ${12 * dpr}px -apple-system, sans-serif`;
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(10,12,16,0.85)';
+        ctx.fillRect(mx - tw / 2 - 5 * dpr, my - 10 * dpr, tw + 10 * dpr, 20 * dpr);
+        ctx.fillStyle = this.color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, mx, my);
+      }
+      ctx.restore();
     }
   }
 
@@ -177,7 +230,10 @@ export class CornerPicker {
   drawLoupe(imgPt, fingerPos) {
     const { ctx, canvas } = this;
     const R = 72 * this.dpr;                       // loupe radius
-    const zoom = Math.max(this.scale * 5, 1.6);    // canvas px per photo px inside loupe
+    // Canvas px per photo px inside the loupe; the floor of 4 keeps real
+    // magnification even when the photo is displayed heavily downscaled
+    // (e.g. the paper sheet is far away and small on screen).
+    const zoom = Math.max(this.scale * 5, 4);
     // Place the loupe above the finger; flip below if it would leave the canvas.
     let cx = fingerPos.x;
     let cy = fingerPos.y - R - 46 * this.dpr;

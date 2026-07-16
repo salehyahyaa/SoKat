@@ -15,8 +15,22 @@ on-device; there is no backend.
 An iPhone browser gets camera access but **not** LiDAR/ARKit (Apple exposes
 those only to native apps), so ClosetScan measures the way photogrammetry
 tools do: a **known-size reference** — a letter-size sheet of paper
-(8.500″ × 11.000″, manufactured to <1/64″ tolerance) taped in the closet —
+(8.500″ × 11.000″, manufactured to <1/64″ tolerance) placed in the closet —
 fixes the scale of the scene.
+
+Two modes:
+
+- **Quick Scan (default)** — ONE photo, paper simply dropped flat on the
+  closet floor (no tape). Width & depth are measured directly on the
+  calibrated floor plane; height is recovered via single-view metrology:
+  the paper's homography is decomposed into the camera pose (Zhang's method,
+  EXIF focal length when available), and the tapped ceiling corners are
+  ray-cast onto the vertical back-wall plane. Measured lines extend and
+  recalculate LIVE as corners are dragged. Typical accuracy ±1/2″
+  (height ±1½″) — see `tests/metrology.test.js` for the noise envelope.
+- **Precision Scan** — the two-photo flow (paper taped to the back wall,
+  then on the floor). Every distance is measured ON a calibrated plane;
+  this is the mode that meets the **1/16″** target.
 
 Pipeline per photo:
 
@@ -30,10 +44,10 @@ camera photo (12 MP)
   → EmptyClosetRenderer: clean 3D interior at measured size, contents gone
 ```
 
-Width & height come from a back-wall photo; depth from a floor photo. An
-optional **refinement pass** (second photo, averaged) cuts random error by
-√2 — that is what carries large spans inside the 1/16″ target (proven in
-`tests/noise.test.js`).
+In Precision Scan, width & height come from a back-wall photo; depth from a
+floor photo. An optional **refinement pass** (second photo, averaged) cuts
+random error by √2 — that is what carries large spans inside the 1/16″
+target (proven in `tests/noise.test.js`).
 
 ## Project structure
 
@@ -47,6 +61,8 @@ optional **refinement pass** (second photo, averaged) cuts random error by
 │   ├── camera.js               # CameraCapture — native iPhone camera via <input capture>
 │   ├── picker.js               # CornerPicker — precision tapping UI with magnifier loupe
 │   ├── homography.js           # Homography — DLT solve + perspective mapping (pure math)
+│   ├── metrology.js            # SingleViewMetrology — camera-pose recovery, 3D from ONE photo
+│   ├── exif.js                 # focal35FromJpeg — EXIF focal length for stable height recovery
 │   ├── measurement.js          # PlaneMeasurement — calibrated plane, pixels → inches
 │   ├── closet-model.js         # ClosetModel — dimensions value object + 1/16″ formatting
 │   ├── emptier.js              # buildEmptiedViews + BeforeAfterView — remove contents from the photo
@@ -55,6 +71,7 @@ optional **refinement pass** (second photo, averaged) cuts random error by
 ├── tests/                      # run with `npm test` (node --test, no deps)
 │   ├── helpers.js              # synthetic pinhole camera + seeded PRNG
 │   ├── homography.test.js      # math correctness & numerical stability
+│   ├── metrology.test.js       # single-photo mode: exactness + honest noise envelope
 │   ├── measurement.test.js     # pipeline units, fractions, accuracy report
 │   ├── synthetic.test.js       # ground-truth closets: pipeline exact to <1/1600″
 │   └── noise.test.js           # tap-noise envelope: proves the 1/16″ operating window

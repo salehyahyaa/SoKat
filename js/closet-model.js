@@ -7,14 +7,18 @@
  * readings is a built-in consistency check surfaced to the user.
  */
 export class ClosetModel {
-  constructor({ widthTop, widthBottom, heightLeft, heightRight, depth }) {
+  // Depth is either a single reading (two-photo flow) or a left/right pair
+  // (single-photo flow), which then joins the consistency check.
+  constructor({ widthTop, widthBottom, heightLeft, heightRight, depth, depthLeft, depthRight }) {
     this.widthTop = widthTop;
     this.widthBottom = widthBottom;
     this.heightLeft = heightLeft;
     this.heightRight = heightRight;
     this.width = (widthTop + widthBottom) / 2;
     this.height = (heightLeft + heightRight) / 2;
-    this.depth = depth;
+    this.depthLeft = depthLeft;
+    this.depthRight = depthRight;
+    this.depth = depthLeft != null ? (depthLeft + depthRight) / 2 : depth;
   }
 
   // Largest disagreement between paired readings of a dimension, inches.
@@ -22,6 +26,7 @@ export class ClosetModel {
     return Math.max(
       Math.abs(this.widthTop - this.widthBottom),
       Math.abs(this.heightLeft - this.heightRight),
+      this.depthLeft != null ? Math.abs(this.depthLeft - this.depthRight) : 0,
     );
   }
 

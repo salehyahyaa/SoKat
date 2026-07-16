@@ -77,7 +77,8 @@ button:active:not(:disabled) { transform: scale(0.98); }
 
 .bar { padding: max(14px, env(safe-area-inset-top)) 16px 12px; background: var(--bg); }
 .bar h2 { font-size: 1.05rem; }
-.bar p { color: var(--muted); font-size: 0.88rem; margin-top: 6px; line-height: 1.35; min-height: 2.4em; }
+/* min-height fits 3 lines so changing instruction text never moves the canvas */
+.bar p { color: var(--muted); font-size: 0.88rem; margin-top: 6px; line-height: 1.35; min-height: 4.05em; }
 .bar.buttons {
   display: flex; gap: 10px;
   padding: 12px 16px max(14px, env(safe-area-inset-bottom));

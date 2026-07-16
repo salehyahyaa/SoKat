@@ -15,6 +15,7 @@
 import { CameraCapture } from './camera.js';
 import { CornerPicker } from './picker.js';
 import { PlaneMeasurement } from './measurement.js';
+import { SingleViewMetrology } from './metrology.js';
 import { ClosetModel } from './closet-model.js';
 import { EmptyClosetRenderer } from './renderer.js';
 import { buildEmptiedViews, BeforeAfterView } from './emptier.js';
@@ -38,6 +39,14 @@ const LABELS = {
     'closet back wall TOP-RIGHT corner',
     'closet back wall BOTTOM-RIGHT corner',
     'closet back wall BOTTOM-LEFT corner',
+  ],
+  closet6: [
+    'closet floor BACK-LEFT corner (floor meets back wall)',
+    'closet floor BACK-RIGHT corner',
+    'closet floor FRONT-LEFT corner (front edge)',
+    'closet floor FRONT-RIGHT corner',
+    'TOP-LEFT of the back wall (at the ceiling)',
+    'TOP-RIGHT of the back wall (at the ceiling)',
   ],
   paperFloor: [
     'paper corner — start of a LONG (11″) edge',
@@ -66,7 +75,8 @@ export class ClosetScanApp {
 
     this.$('btn-view-photo').addEventListener('click', () => this.setResultsView('photo'));
     this.$('btn-view-3d').addEventListener('click', () => this.setResultsView('3d'));
-    this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
+    this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runQuickScan()));
+    this.$('btn-precision').addEventListener('click', () => this.runGuarded(() => this.runPrecisionScan()));
     this.$('btn-accuracy').addEventListener('click', () => this.runGuarded(() => this.runAccuracyCheck()));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
     this.$('btn-acc-home').addEventListener('click', () => this.showScreen('welcome'));
@@ -164,7 +174,7 @@ export class ClosetScanApp {
   // ------------------------------------------------------------------ pick
 
   // One corner-picking session on a photo; resolves the points, or RETAKE.
-  pickPoints(photo, { title, labels, color, ghosts = [], doneText }) {
+  pickPoints(photo, { title, labels, color, ghosts = [], doneText, segments = [], segmentLabel = null }) {
     this.showScreen('pick');
     this.$('pick-title').textContent = title;
     const canvas = this.$('pick-canvas');
@@ -178,14 +188,19 @@ export class ClosetScanApp {
       const update = (picker) => {
         btnNext.disabled = !picker.complete;
         const n = picker.points.length;
+        // Keep this short & stable — long wrapping text here resizes the
+        // header and shifts the photo under the user's finger between taps.
+        const coach = n === 0 ? ' (slide to align in the loupe, lift to set)' : '';
         instruction.textContent = picker.complete
           ? `✓ All ${labels.length} set — ${doneText || 'drag any point to fine-tune, then tap Next'}`
-          : `${n + 1} of ${labels.length}: tap the ${labels[n]} — slide to line up the loupe crosshair, then lift`;
+          : `${n + 1} of ${labels.length}: tap the ${labels[n]}${coach}`;
       };
       const picker = new CornerPicker(canvas, photo, {
         count: labels.length,
         color,
         ghosts,
+        segments,
+        segmentLabel,
         onChange: update,
       });
       this.picker = picker;
@@ -208,7 +223,100 @@ export class ClosetScanApp {
 
   // ------------------------------------------------------------------ scan
 
-  async runScan() {
+  // Quick Scan: ONE photo, paper simply dropped flat on the closet floor.
+  // Width & depth are measured on the calibrated floor plane; height is
+  // recovered from the camera pose (EXIF focal when available). Convenience
+  // mode — typical accuracy ±1/2″, height ±1½″.
+  async runQuickScan() {
+    const scan = await this.stepQuickScan();
+    await this.withLoading(
+      'Emptying your closet…',
+      'Removing contents and calculating dimensions',
+      async () => this.showResults(scan),
+      1400,
+    );
+  }
+
+  async stepQuickScan() {
+    while (true) {
+      const photo = await this.capturePhoto(
+        'One photo — the whole closet',
+        'Drop the letter-size sheet <b>flat on the closet floor</b> — no tape '
+        + 'needed.<br><br>Step back so ONE photo shows the <b>whole closet</b>: '
+        + 'the floor from its front edge to the back wall, and the back wall '
+        + 'up to the ceiling. Shoot from a natural standing height.',
+      );
+      const paper = await this.pickPoints(photo, {
+        title: 'Calibrate — paper corners',
+        labels: LABELS.paperFloor,
+        color: PAPER_COLOR,
+      });
+      if (paper === RETAKE) continue;
+
+      let metro;
+      try {
+        metro = new SingleViewMetrology(paper, photo.width, photo.height, {
+          focalPx: photo.focalPx || null,
+        });
+      } catch (err) {
+        alert(`${err.message || err}`);
+        continue;
+      }
+      await this.flashStep(
+        'Floor calibrated',
+        'Same photo — tap the 6 closet corners. Lines measure LIVE as you drag.',
+      );
+
+      // Measured live segments: back width, front width, both depths, both
+      // heights — the tape-measure lines that follow the finger.
+      const SEGMENTS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 4], [1, 5]];
+      const SEG_PREFIX = { '0,1': 'W', '2,3': 'W', '0,2': 'D', '1,3': 'D', '0,4': 'H', '1,5': 'H' };
+      const pts = await this.pickPoints(photo, {
+        title: 'Measure — closet corners',
+        labels: LABELS.closet6,
+        color: TARGET_COLOR,
+        ghosts: [{ points: paper, color: PAPER_COLOR }],
+        segments: SEGMENTS,
+        segmentLabel: (i, j, a, b) => {
+          const prefix = SEG_PREFIX[`${i},${j}`];
+          if (prefix === 'H') {
+            const base = this.picker?.points;
+            if (!base || !base[0] || !base[1]) return null;
+            return `H ${ClosetModel.toFraction16(metro.wallHeight(base[0], base[1], b))}`;
+          }
+          return `${prefix} ${ClosetModel.toFraction16(metro.distance(a, b))}`;
+        },
+      });
+      if (pts === RETAKE) continue;
+
+      try {
+        const backQuad = [pts[4], pts[5], pts[1], pts[0]]; // TL TR BR BL
+        return {
+          model: new ClosetModel({
+            widthTop: metro.distance(pts[0], pts[1]),
+            widthBottom: metro.distance(pts[2], pts[3]),
+            heightLeft: metro.wallHeight(pts[0], pts[1], pts[4]),
+            heightRight: metro.wallHeight(pts[0], pts[1], pts[5]),
+            depthLeft: metro.distance(pts[0], pts[2]),
+            depthRight: metro.distance(pts[1], pts[3]),
+          }),
+          photo,
+          closetQuad: backQuad,
+          wallColor: sampleWallColor(photo, backQuad),
+          note: metro.focalSource === 'exif'
+            ? 'Quick Scan (1 photo) · typical ±1/2″, height ±1½″ — use Precision Scan for 1/16″'
+            : 'Quick Scan (1 photo, no camera EXIF — height is approximate) — use Precision Scan for 1/16″',
+        };
+      } catch (err) {
+        alert(`${err.message || err}`);
+      }
+    }
+  }
+
+  // Precision Scan: the original two-photo flow — paper taped to the back
+  // wall, then on the floor. Everything is measured ON a calibrated plane,
+  // which is what reaches the 1/16″ target (see tests/noise.test.js).
+  async runPrecisionScan() {
     let wall = await this.stepBackWall();
     let passes = 1;
     if (await this.offerRefinement()) {
@@ -231,7 +339,13 @@ export class ClosetScanApp {
     await this.withLoading(
       'Emptying your closet…',
       'Removing contents and calculating dimensions to 1/16″',
-      async () => this.showResults(wall, depth, passes),
+      async () => this.showResults({
+        model: new ClosetModel({ ...wall, depth }),
+        photo: wall.photo,
+        closetQuad: wall.closetQuad,
+        wallColor: wall.wallColor,
+        note: `Precision Scan (2 photos) · targets 1/16″${passes > 1 ? ` · ${passes} passes averaged` : ''}`,
+      }),
       1400,
     );
   }
@@ -327,8 +441,7 @@ export class ClosetScanApp {
     }
   }
 
-  showResults(wall, depth, passes = 1) {
-    const model = new ClosetModel({ ...wall, depth });
+  showResults({ model, photo, closetQuad, wallColor, note }) {
     this.showScreen('results');
     this.$('dims').innerHTML = [
       dimCard('Width', model.widthText),
@@ -337,17 +450,17 @@ export class ClosetScanApp {
     ].join('');
 
     const spreadText = ClosetModel.toFraction16(model.maxSpread);
-    const passNote = passes > 1 ? ` · ${passes} measurement passes averaged` : '';
-    this.$('diagnostics').innerHTML = model.isConsistent
-      ? `<span class="ok">✓ Consistency check passed</span> — opposite edges agree within ${spreadText}${passNote}`
-      : `<span class="warn">⚠ Opposite edges differ by ${spreadText}</span> — refine your corner taps or retake the photo more square-on`;
+    const consistency = model.isConsistent
+      ? `<span class="ok">✓ Consistency check passed</span> — paired readings agree within ${spreadText}`
+      : `<span class="warn">⚠ Paired readings differ by ${spreadText}</span> — refine your corner taps or retake the photo`;
+    this.$('diagnostics').innerHTML = `${consistency}<br>${note}`;
 
     if (this.renderer) { this.renderer.destroy(); this.renderer = null; }
     if (this.compareView) { this.compareView.destroy(); this.compareView = null; }
     this.resultsModel = model;
-    this.resultsWallColor = wall.wallColor;
-    if (wall.photo && wall.closetQuad) {
-      const views = buildEmptiedViews(wall.photo, wall.closetQuad, wall.wallColor);
+    this.resultsWallColor = wallColor;
+    if (photo && closetQuad) {
+      const views = buildEmptiedViews(photo, closetQuad, wallColor);
       this.compareView = new BeforeAfterView(this.$('compare-canvas'), views);
     }
     this.setResultsView(this.compareView ? 'photo' : '3d');
@@ -399,12 +512,15 @@ export class ClosetScanApp {
         'Sheet A calibrated',
         'Same photo — now tap the two ends of the known distance',
       );
+      const livePlane = new PlaneMeasurement(paper);
       const pts = await this.pickPoints(photo, {
         title: 'Measure a known distance',
         labels: LABELS.accuracy,
         color: TARGET_COLOR,
         ghosts: [{ points: paper, color: PAPER_COLOR }],
         doneText: 'tip: sheet B\'s long edge is exactly 11.000″ — tap Next',
+        segments: [[0, 1]],
+        segmentLabel: (i, j, a, b) => `${livePlane.distance(a, b).toFixed(3)}″`,
       });
       if (pts === RETAKE) continue;
 

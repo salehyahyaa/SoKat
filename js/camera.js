@@ -13,6 +13,8 @@
  * subscribed; a cancelled camera simply delivers nothing, and the caller's
  * "Open Camera" button stays armed for another try.
  */
+import { focal35FromJpeg } from './exif.js';
+
 export class CameraCapture {
   constructor(inputEl) {
     this.input = inputEl;
@@ -44,7 +46,13 @@ export class CameraCapture {
 
   // Decode a photo file to a canvas. <img> decoding applies EXIF orientation,
   // so pixels come out upright; downscales only past Safari's canvas limit.
+  // The camera's focal length (from EXIF, in pixels at the returned canvas
+  // resolution) is attached as canvas.focalPx, or null when unavailable.
   static async fileToCanvas(file) {
+    let focal35 = null;
+    try {
+      focal35 = focal35FromJpeg(await file.arrayBuffer());
+    } catch { /* no EXIF — single-photo height falls back to recovery */ }
     const url = URL.createObjectURL(file);
     try {
       const img = await new Promise((res, rej) => {
@@ -62,6 +70,8 @@ export class CameraCapture {
       canvas.width = w;
       canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      // 35mm-equivalent focal → pixels: full-frame is 36mm along the long side.
+      canvas.focalPx = focal35 ? (Math.max(w, h) * focal35) / 36 : null;
       return canvas;
     } finally {
       URL.revokeObjectURL(url);
