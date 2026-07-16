@@ -1,9 +1,10 @@
 # SpaceScan
 
 Measure a closet's width & height with an iPhone — in Safari, no app
-install. The **iPhone camera is the sensor**; physical scale comes from
-**any flat rectangle of known size** (default: 8.5 × 11″ paper) placed on
-the measured plane. One photo, validated at every step, with an honest
+install, nothing to type, no reference object. The **iPhone camera is the
+sensor**; scale is inferred automatically from the camera's recovered
+position (assumed standing phone height), and tapping any result lets the
+user correct it. One photo, validated at every step, with an honest
 confidence score and a built-in tape-measure validation mode.
 
 **Demo:** open the GitHub Pages URL on an iPhone in Safari. Everything runs
@@ -14,20 +15,21 @@ on-device; there is no backend.
 ```
 photo (iPhone camera via <input capture>)
   → capture-quality checks (resolution, EXIF, user confirmation)
-  → tap the reference's 4 corners, any order around it (magnifier loupe,
-      undo/reset/retake; orientation auto-resolves from the edge ratio)
-  → geometry validation: convex quad, size, rectangularity (homography
-      column orthogonality under the EXIF or vanishing-point focal —
-      rejects bent/misplaced references)
-  → homography (DLT) = perspective rectification: image px ↔ plane inches
+  → tap the back wall's 4 corners (magnifier loupe, undo/reset/retake)
+  → geometry validation: convex quad, size, tops-above-bottoms, side tilt,
+      rectangularity residual under the EXIF or vanishing-point focal
+  → pose recovery: the wall rectangle + focal → camera position; assuming
+      a vertical wall on a horizontal floor, the camera's height above the
+      floor in wall units + a standing phone height (58″) = absolute scale
+      (exact on synthetic ground truth — tests/metrology.test.js)
   → tap 2 endpoints per dimension (live measured length on the line)
-  → endpoint validation: separation, borders, plausibility bounds
-  → accept width, accept height → results
+  → endpoint validation + plausibility bounds → accept height, accept width
 ```
 
-- Width & height come from **one back-wall view**: the reference and both
-  endpoint pairs share a physical plane — the regime where a single
-  homography is exact.
+- The phone-height assumption is the dominant error: results carry an
+  explicit **±8% band** until the user taps a result and corrects it, which
+  rescales the other dimension from the photo's exact proportions (band
+  drops to ~±1%).
 - **Confidence** (High/Medium/Low) is scored per view from: sheet size in
   frame, rectangularity residual, edge-order ratio, endpoint leverage
   (distance from the sheet), resolution, and focal cross-checks. The scan's
@@ -48,10 +50,10 @@ photo (iPhone camera via <input capture>)
    scenes of exactly known size; the pipeline must recover distances to
    <1e-6 relative error (`tests/synthetic.test.js`, `measurement.test.js`).
 2. **Rule tests (CI):** every rejection path has a unit test — crossed or
-   duplicated reference corners, reference too small, tap-order
-   auto-resolution, non-rectangular taps, near-identical endpoints,
-   implausible values, confidence tiers, display formatting
-   (`tests/validation.test.js`).
+   duplicated corners, outline too small, top-below-bottom, misplaced-corner
+   rectangularity, near-identical endpoints, implausible values, confidence
+   tiers, display formatting (`tests/validation.test.js`); the camera-height
+   scale recovery is proven exact in `tests/metrology.test.js`.
 3. **Noise envelope (CI):** seeded tap noise quantifies expected error
    (`tests/noise.test.js`); the UI's ±% band comes from the same model.
 4. **In-app Validation mode:** tape-measure the same closet, record trials;
@@ -63,11 +65,11 @@ photo (iPhone camera via <input capture>)
 - Display formats to the nearest **1/16″** and feet/inches. **That is
   display resolution, not measured accuracy** — every result carries an
   explicit ±% band, and the diagnostics panel shows unrounded values.
-- The math is exact; real error comes from tap precision (±0.5–2 px), lens
-  distortion, sheet flatness, and endpoint leverage. Under good conditions
-  the noise model predicts roughly **±0.5–2% per dimension** (about
-  1/8″–3/4″ on typical closet spans); the app never claims the 1/16″ target
-  is met unless every recorded validation-trial error is ≤ 0.0625″.
+- The math is exact; real error is dominated by the phone-height
+  assumption (±8% typical) until the user corrects one dimension, after
+  which tap precision and lens distortion dominate (~±1–2%). The app never
+  claims the 1/16″ target is met unless every recorded validation-trial
+  error is ≤ 0.0625″.
 - Safari exposes **no LiDAR/ARKit/RoomPlan/WebXR** — this is the strongest
   honest implementation available in a browser. A native iOS app could use
   RoomPlan (roughly inch-level) or ARKit ray-casting; true 1/16″ generally
@@ -87,10 +89,11 @@ GitHub Pages only when they pass.
 ## Limitations
 
 - Measures width & height on the wall plane; depth is not measured.
-- Assumes the wall is planar and the reference lies flat on it; the entered
-  reference size must be accurate — its error scales all results.
-- Endpoints must lie (approximately) on the calibrated plane; off-plane
-  features add error the homography can't correct.
+- Assumes a planar vertical wall on a horizontal floor, photographed from a
+  standing position; crouching or holding the phone unusually high skews
+  the auto-scale (the tap-to-correct fixes it).
+- Endpoints must lie (approximately) on the wall plane; off-plane features
+  add error the homography can't correct.
 - Wide-angle (0.5×) lens distortion is uncorrected — the app tells users to
   avoid it.
 - The inpainting cleanup is approximate by design and labeled experimental.

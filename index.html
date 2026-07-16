@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — closet measurement</title>
-  <link rel="stylesheet" href="css/style.css?v=12">
+  <link rel="stylesheet" href="css/style.css?v=13">
 </head>
 <body>
   <main id="app">
@@ -15,16 +15,16 @@
     <section id="screen-welcome" class="screen">
       <div class="hero">
         <h1>Space<span>Scan</span></h1>
-        <p class="tagline">Measure width &amp; height from one iPhone photo, calibrated by any flat rectangle of known size.</p>
+        <p class="tagline">Width &amp; height from one iPhone photo. Nothing to type, nothing to tape up.</p>
       </div>
       <ol class="how">
-        <li><b>One photo</b> with the reference in it</li>
-        <li><b>Tap</b> — 4 reference corners, then 2 endpoints per dimension</li>
-        <li><b>Results</b> — width &amp; height</li>
+        <li><b>One photo</b> of the back wall</li>
+        <li><b>Tap</b> its 4 corners, then 2 points per measurement</li>
+        <li><b>Done</b> — width &amp; height</li>
       </ol>
       <p class="supported">
-        Needs: any <b>flat rectangle of known size</b> (default: 8.5×11″ paper).<br>
-        Sensor: the iPhone camera (Safari has no LiDAR access).
+        Sensor: the iPhone camera (Safari has no LiDAR access). Scale is
+        inferred from the shot — tap any result to fine-tune it.
       </p>
       <div class="stack">
         <button id="btn-start" class="primary">Start</button>
@@ -38,20 +38,15 @@
       <div class="guide-wrap">
         <canvas id="guide-large" width="512" height="512"></canvas>
         <ul class="tap-order">
-          <li>Reference = the known size</li>
-          <li>Tap its 4 corners to calibrate</li>
-          <li>Tap 2 endpoints to measure</li>
+          <li>Outline the back wall — 4 taps</li>
+          <li>Height — 2 taps, confirm</li>
+          <li>Width — 2 taps, confirm</li>
         </ul>
       </div>
-      <div class="acc-grid">
-        <div class="acc-row"><span>Reference size (long × short)</span>
-          <span class="ref-size"><input id="ref-long" type="number" inputmode="decimal" min="0" step="0.1"> × <input id="ref-short" type="number" inputmode="decimal" min="0" step="0.1"> ″</span>
-        </div>
-      </div>
       <ul class="checklist">
-        <li>Reference <b>flat</b> on the measured surface</li>
-        <li>Stand centered · avoid 0.5× lens &amp; heavy tilt</li>
-        <li>Good light · reference and endpoints in frame</li>
+        <li><b>Stand up</b>, phone at chest height</li>
+        <li>Whole wall in frame, floor to ceiling</li>
+        <li>Avoid the 0.5× lens &amp; heavy tilt</li>
       </ul>
       <div class="stack push-down">
         <button id="btn-guide-continue" class="primary">Start step 1</button>
@@ -76,7 +71,7 @@
       <canvas id="photocheck-canvas"></canvas>
       <ul class="checklist auto" id="photocheck-auto"></ul>
       <ul class="checklist" id="photocheck-list">
-        <li><label><input id="photocheck-confirm" type="checkbox"> Reference is flat and fully visible</label></li>
+        <li><label><input id="photocheck-confirm" type="checkbox"> The whole back wall is visible, floor to ceiling</label></li>
       </ul>
       <div class="bar buttons">
         <button id="btn-photocheck-retake" class="secondary">Retake</button>
@@ -168,6 +163,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=12"></script>
+  <script type="module" src="js/app.js?v=13"></script>
 </body>
 </html>

@@ -1,20 +1,17 @@
 /**
- * Scan validation for the paper-calibrated plane method — every rule that
+ * Scan validation for the wall-outline measurement flow — every rule that
  * stands between a tap session and a displayed measurement. Pure math, no
  * DOM; unit-tested in CI.
  *
  * Layers:
- *   validatePaperQuad — are the 4 tapped sheet corners a plausible quad?
- *   paperPoseChecks   — does the quad behave like a real 8.5×11″ rectangle
- *                       (orthogonality, edge-order/orientation, focal)?
+ *   validateWallQuad  — are the 4 tapped wall corners a plausible outline?
+ *   orthoResidual     — does the quad behave like a real rectangle under
+ *                       the camera focal (rejects misplaced corners)?
  *   validateEndpoints — are the two measurement endpoints usable, and is
  *                       the measured value physically plausible?
  *   validateResultDims— final bounds + proportion sanity across dimensions.
- * plus per-view confidence scoring and honest display formatting.
+ * plus confidence scoring and honest display formatting.
  */
-
-// US Letter sheet, landscape, manufactured tolerance well under 1/64″.
-export const PAPER = { LONG: 11.0, SHORT: 8.5 };
 
 // Hard physical bounds (block) and typical closet band (warn) per dimension.
 export const PLAUSIBLE = {
@@ -26,12 +23,9 @@ export const PLAUSIBLE = {
 export const THRESHOLDS = {
   borderHardPx: 6,
   minPointSepFrac: 0.01, // of image diagonal
-  minPaperAreaFrac: 0.0008, // of image area (~55x40 px in a 12 MP shot)
   minEndpointSepFrac: 0.05, // of image diagonal
   orthoWarn: 0.08,
   orthoBlock: 0.25,
-  normRatioSwapLo: 0.72, // |a1|/|a2| near (8.5/11)^2≈0.6 means edges swapped
-  normRatioWarn: 0.85,
   focalRangeDiagMin: 0.15,
   focalRangeDiagMax: 4.0,
   maxLeverage: 14, // endpoint distance / paper size, in paper diagonals
@@ -75,40 +69,48 @@ function dedupe(list) {
   });
 }
 
-// ------------------------------------------------------------- paper quad
+// -------------------------------------------------------- wall outline
 
-export function validatePaperQuad(pts, imgW, imgH) {
+// The 4 tapped corners of the back wall, order: bottom-left, bottom-right,
+// top-right, top-left. Every failed rule is a specific, actionable message.
+export function validateWallQuad(pts, imgW, imgH) {
   const errors = [];
   const warnings = [];
   if (!pts || pts.length !== 4) {
-    return { ok: false, errors: [{ code: 'count', message: 'All 4 reference corners are required.' }], warnings, metrics: {} };
+    return { ok: false, errors: [{ code: 'count', message: 'All 4 wall corners are required.' }], warnings, metrics: {} };
   }
+  const [bl, br, tr, tl] = pts;
+  const names = ['bottom-left', 'bottom-right', 'top-right', 'top-left'];
   const diag = Math.hypot(imgW, imgH);
 
   pts.forEach((p, i) => {
     const m = Math.min(p.x, p.y, imgW - p.x, imgH - p.y);
     if (m < THRESHOLDS.borderHardPx) {
-      errors.push({ code: 'border', message: `Reference corner ${i + 1} touches the photo edge — the whole reference must be in frame.` });
+      errors.push({ code: 'border', message: `The ${names[i]} corner touches the photo edge — step back so the whole wall is in frame.` });
     }
   });
   for (let i = 0; i < 4; i++) {
     for (let j = i + 1; j < 4; j++) {
       if (dist(pts[i], pts[j]) < THRESHOLDS.minPointSepFrac * diag) {
-        errors.push({ code: 'duplicate', message: `Reference corners ${i + 1} and ${j + 1} are almost on top of each other — re-place one.` });
+        errors.push({ code: 'duplicate', message: `The ${names[i]} and ${names[j]} corners are almost on top of each other — re-place one.` });
       }
     }
   }
   if (!isConvexQuad(pts)) {
-    errors.push({ code: 'crossed', message: 'The corners cross over — tap them going around the reference, one corner after the next.' });
+    errors.push({ code: 'crossed', message: 'The corners cross over — go around the wall: bottom-left, bottom-right, top-right, top-left.' });
   }
-  const areaFrac = quadArea(pts) / (imgW * imgH);
-  if (errors.length === 0 && areaFrac < THRESHOLDS.minPaperAreaFrac) {
-    errors.push({ code: 'paper-small', message: 'The reference is too small in the photo — step closer so it\'s clearly visible.' });
+  if (errors.length === 0 && quadArea(pts) < 0.015 * imgW * imgH) {
+    errors.push({ code: 'quad-small', message: 'The wall outline is too small in the photo — step closer.' });
   }
-  return { ok: errors.length === 0, errors: dedupe(errors), warnings, metrics: { areaFrac } };
-}
+  const clearance = 0.03 * imgH;
+  if (!(tl.y < bl.y - clearance)) errors.push({ code: 'top-below', message: 'The top-left corner must be clearly above the bottom-left corner.' });
+  if (!(tr.y < br.y - clearance)) errors.push({ code: 'top-below', message: 'The top-right corner must be clearly above the bottom-right corner.' });
+  const tilt = (a, b) => Math.abs(Math.atan2(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) * 180 / Math.PI);
+  if (tilt(bl, tl) > 35) errors.push({ code: 'side-tilt', message: 'The left side leans too far — top-left should be roughly above bottom-left.' });
+  if (tilt(br, tr) > 35) errors.push({ code: 'side-tilt', message: 'The right side leans too far — top-right should be roughly above bottom-right.' });
 
-// ------------------------------------------------- paper pose cross-checks
+  return { ok: errors.length === 0, errors: dedupe(errors), warnings, metrics: { areaFrac: quadArea(pts) / (imgW * imgH) } };
+}
 
 // Line intersection of infinite lines; null when ~parallel.
 export function lineIntersection(a1, a2, b1, b2) {
@@ -119,7 +121,7 @@ export function lineIntersection(a1, a2, b1, b2) {
   return { x: a1.x + s * d1.x, y: a1.y + s * d1.y };
 }
 
-// Focal from the sheet's two vanishing points (orthogonal edge directions).
+// Focal from the quad's two vanishing points (orthogonal edge directions).
 export function focalFromVanishingPoints(pts, cx, cy) {
   const v1 = lineIntersection(pts[0], pts[1], pts[3], pts[2]);
   const v2 = lineIntersection(pts[0], pts[3], pts[1], pts[2]);
@@ -128,78 +130,14 @@ export function focalFromVanishingPoints(pts, cx, cy) {
   return f2 > 0 ? Math.sqrt(f2) : null;
 }
 
-// Given the plane->image homography columns for the world mapping
-// (0,0)(11,0)(11,8.5)(0,8.5), a REAL letter sheet tapped in the right order
-// yields orthogonal, equal-norm K⁻¹ columns. |a1|/|a2| far below 1 means the
-// user started along a SHORT edge (world 11″ mapped onto the real 8.5″ edge).
-export function paperPoseChecks(paperPts, imgW, imgH, { exifFocal = null, homographyColumns = null } = {}) {
-  const errors = [];
-  const warnings = [];
-  const metrics = {};
-  const cx = imgW / 2; const cy = imgH / 2;
-  const diag = Math.hypot(imgW, imgH);
-
-  const fVP = focalFromVanishingPoints(paperPts, cx, cy);
-  metrics.focalVP = fVP;
-  metrics.focalEXIF = exifFocal;
-  if (fVP != null && (fVP < THRESHOLDS.focalRangeDiagMin * diag || fVP > THRESHOLDS.focalRangeDiagMax * diag)) {
-    warnings.push({ code: 'focal-implausible', message: 'The reference\'s perspective looks unusual — check the corner taps' });
-  }
-  if (fVP != null && exifFocal) {
-    metrics.focalDisagreePct = Math.abs(fVP - exifFocal) / exifFocal * 100;
-    if (metrics.focalDisagreePct > 40) {
-      warnings.push({ code: 'focal-disagree', message: `Reference perspective disagrees ${metrics.focalDisagreePct.toFixed(0)}% with the camera focal — corner taps may be off` });
-    }
-  }
-
-  if (homographyColumns) {
-    // Only trust a vanishing-point focal that's in a plausible range —
-    // near-fronto-parallel views (the RECOMMENDED shooting angle) push the
-    // VPs toward infinity and make fVP numerically meaningless.
-    const fVPusable = fVP != null
-      && fVP >= THRESHOLDS.focalRangeDiagMin * diag
-      && fVP <= THRESHOLDS.focalRangeDiagMax * diag ? fVP : null;
-    const f = exifFocal || fVPusable;
-    const { h1, h2 } = homographyColumns;
-
-    let a1 = null; let a2 = null;
-    if (f) {
-      // Full metric check: valid at any viewing angle.
-      const k = (h) => [(h[0] - h[2] * cx) / f, (h[1] - h[2] * cy) / f, h[2]];
-      a1 = k(h1); a2 = k(h2);
-    } else {
-      // No focal available. The affine approximation (image-space edge
-      // directions) is only meaningful when perspective is weak — check via
-      // opposite-edge length ratios; oblique views foreshorten one axis and
-      // would produce false rejections.
-      const el = (a, b) => dist(paperPts[a], paperPts[b]);
-      const r1 = el(0, 1) / Math.max(1e-9, el(3, 2));
-      const r2 = el(0, 3) / Math.max(1e-9, el(1, 2));
-      const weak = (r) => r > 0.92 && r < 1.087;
-      if (weak(r1) && weak(r2)) {
-        a1 = [h1[0], h1[1], 0]; a2 = [h2[0], h2[1], 0];
-      } else {
-        metrics.unverified = true;
-        warnings.push({ code: 'sheet-unverified', message: 'No camera focal data and an angled view — the reference\'s proportions can\'t be cross-checked' });
-      }
-    }
-    if (a1 && a2) {
-      const n1 = Math.hypot(...a1); const n2 = Math.hypot(...a2);
-      if (n1 > 1e-12 && n2 > 1e-12) {
-        metrics.orthoResidual = Math.abs((a1[0] * a2[0] + a1[1] * a2[1] + a1[2] * a2[2]) / (n1 * n2));
-        metrics.normRatio = n1 / n2;
-        if (metrics.orthoResidual > THRESHOLDS.orthoBlock) {
-          errors.push({ code: 'not-rectangle', message: 'The 4 taps don\'t behave like a flat rectangle — is the reference flat, and are the taps on its actual corners?' });
-        } else if (metrics.orthoResidual > THRESHOLDS.orthoWarn) {
-          warnings.push({ code: 'not-rectangle', message: 'Reference corners are only approximately rectangular' });
-        }
-        if (metrics.normRatio < THRESHOLDS.normRatioWarn || metrics.normRatio > 1 / THRESHOLDS.normRatioWarn) {
-          warnings.push({ code: 'proportions', message: 'Reference proportions look off — double-check the corner taps' });
-        }
-      }
-    }
-  }
-  return { ok: errors.length === 0, errors: dedupe(errors), warnings: dedupe(warnings), metrics };
+// |cos| between the K⁻¹ homography columns — ~0 when the tapped quad really
+// is a rectangle under focal f; grows when it isn't (bad corner placement).
+export function orthoResidual(h1, h2, f, cx, cy) {
+  const k = (h) => [(h[0] - h[2] * cx) / f, (h[1] - h[2] * cy) / f, h[2]];
+  const a = k(h1); const b = k(h2);
+  const na = Math.hypot(...a); const nb = Math.hypot(...b);
+  if (na < 1e-12 || nb < 1e-12) return 1;
+  return Math.abs((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (na * nb));
 }
 
 // -------------------------------------------------------------- endpoints
@@ -348,10 +286,9 @@ export function feetInches(inches) {
 }
 
 // Expected relative error (%) for one measured dimension.
-export function errorBandPct({ leverage = 3, orthoResidual = 0, paperAreaFrac = 0.01 } = {}) {
-  let pct = 0.5;
+export function errorBandPct({ leverage = 1, orthoResidual: ortho = 0, autoScale = true } = {}) {
+  let pct = autoScale ? 8 : 1; // phone-height assumption dominates until corrected
   pct += Math.max(0, leverage - 1) * 0.35;
-  pct += (orthoResidual || 0) * 25;
-  if (paperAreaFrac < 0.004) pct += 1;
-  return Math.min(15, Math.max(0.5, Math.round(pct * 10) / 10));
+  pct += (ortho || 0) * 25;
+  return Math.min(25, Math.max(0.5, Math.round(pct * 10) / 10));
 }
