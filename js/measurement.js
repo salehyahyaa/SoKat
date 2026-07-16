@@ -24,6 +24,12 @@ export class PlaneMeasurement {
       { x: 0, y: shortIn },
     ];
     this.homography = Homography.solve(refCornersPx, world);
+    // plane->image direction too: its columns feed the rectangle validation.
+    const Hpi = Homography.solve(world, refCornersPx).m;
+    this.Hcols = {
+      h1: [Hpi[0][0], Hpi[1][0], Hpi[2][0]],
+      h2: [Hpi[0][1], Hpi[1][1], Hpi[2][1]],
+    };
   }
 
   // Image-pixel point -> plane coordinates in inches.

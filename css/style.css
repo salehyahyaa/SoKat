@@ -279,3 +279,9 @@ button:active:not(:disabled) { transform: scale(0.98); }
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- capture illustration ---------- */
+#capture-illust {
+  width: 160px; height: 160px; margin: 14px auto 0;
+  background: var(--panel); border-radius: 14px; display: block;
+}

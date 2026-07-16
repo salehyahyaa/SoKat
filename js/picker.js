@@ -11,10 +11,14 @@
  * resolution), independent of screen scale — screen zoom never costs accuracy.
  */
 export class CornerPicker {
-  // segments: pairs of point indices connected with dashed wireframe lines
-  // (drawn as soon as both endpoints exist, following drags live) so the
-  // user can verify the box geometry while placing points.
-  constructor(canvas, photo, { count, color = '#00e5a0', onChange = null, segments = [] }) {
+  // segments: point-index pairs connected with dashed lines (drawn live as
+  // both endpoints exist). segmentLabel(i, j, a, b) -> text drawn on the
+  // segment's midpoint (e.g. a live measured length). ghosts: fixed point
+  // sets from an earlier session, shown for context (not editable).
+  constructor(canvas, photo, {
+    count, color = '#00e5a0', onChange = null,
+    segments = [], segmentLabel = null, ghosts = [],
+  }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.photo = photo;
@@ -22,6 +26,8 @@ export class CornerPicker {
     this.color = color;
     this.onChange = onChange;
     this.segments = segments;
+    this.segmentLabel = segmentLabel;
+    this.ghosts = ghosts;
     this.points = [];
     this.dragIndex = -1;
     this.dpr = window.devicePixelRatio || 1;
@@ -155,6 +161,9 @@ export class CornerPicker {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(this.display, this.offsetX, this.offsetY);
+    for (const ghost of this.ghosts) {
+      ghost.points.forEach((pt, i) => this.drawMarker(pt, ghost.color, i + 1, 0.45));
+    }
     this.drawSegments();
     this.points.forEach((pt, i) => this.drawMarker(pt, this.color, i + 1));
     if (this.dragIndex >= 0 && fingerPos) {
@@ -180,16 +189,34 @@ export class CornerPicker {
       ctx.moveTo(ca.x, ca.y);
       ctx.lineTo(cb.x, cb.y);
       ctx.stroke();
+      ctx.setLineDash([]);
+      let label = null;
+      if (this.segmentLabel) {
+        try { label = this.segmentLabel(i, j, a, b); } catch { label = null; }
+      }
+      if (label) {
+        const mx = (ca.x + cb.x) / 2;
+        const my = (ca.y + cb.y) / 2;
+        ctx.font = `bold ${12 * dpr}px -apple-system, sans-serif`;
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(10,12,16,0.85)';
+        ctx.fillRect(mx - tw / 2 - 5 * dpr, my - 10 * dpr, tw + 10 * dpr, 20 * dpr);
+        ctx.fillStyle = this.color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, mx, my);
+      }
       ctx.restore();
     }
   }
 
 
-  drawMarker(imgPt, color, label) {
+  drawMarker(imgPt, color, label, alpha = 1) {
     const { ctx } = this;
     const c = this.imgToCanvas(imgPt);
     const r = 11 * this.dpr;
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 * this.dpr;
     ctx.beginPath();

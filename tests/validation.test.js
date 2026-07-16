@@ -1,231 +1,174 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  validateGeometry, crossChecks, validateReference, validateResult,
-  confidence, toFraction, segmentsIntersect, isConvexQuad,
-  focalFromVanishingPoints, errorBandPct,
+  validatePaperQuad, paperPoseChecks, validateEndpoints, validateResultDims,
+  confidenceView, confidenceOverall, toFraction, feetInches, errorBandPct,
+  focalFromVanishingPoints, isConvexQuad, PAPER,
 } from '../js/validation.js';
-import { rectangleMetrology } from '../js/metrology.js';
-import { ClosetModel } from '../js/closet-model.js';
-import { PinholeCamera } from './helpers.js';
+import { PlaneMeasurement } from '../js/measurement.js';
+import { PinholeCamera, paperOnWall } from './helpers.js';
 
 const IMG_W = 4032;
 const IMG_H = 3024;
 
-// A well-shot rectangular closet: W x H x D inches, floor y=0, wall z=0.
-function goodScene({ W = 40, H = 84, D = 28, eye = [15, 62, 95], f = 2900 } = {}) {
-  const cam = new PinholeCamera({ eye, target: [0, 40, 0], f, cx: IMG_W / 2, cy: IMG_H / 2 });
+// A well-shot back wall: paper taped at chest height, camera standing back.
+function wallScene({ f = 2900, eye = [10, 55, 90] } = {}) {
+  const cam = new PinholeCamera({ eye, target: [0, 45, 0], f, cx: IMG_W / 2, cy: IMG_H / 2 });
   const px = (p) => cam.project(p);
   return {
-    pts: [
-      px([-W / 2, 0, 0]), px([W / 2, 0, 0]),   // back-bottom L/R
-      px([-W / 2, 0, D]), px([W / 2, 0, D]),   // front-bottom L/R
-      px([-W / 2, H, 0]), px([W / 2, H, 0]),   // back-top L/R
-    ],
-    truth: { W, H, D },
+    cam,
+    px,
+    paper: paperOnWall(6, 50).map(px), // TL TR BR BL, long edge first
     f,
   };
 }
 
-// --------------------------------------------------------------- geometry
+// ------------------------------------------------------------- paper quad
 
-test('good closet geometry passes validation', () => {
-  const s = goodScene({ eye: [15, 62, 95], f: 1456 }); // 0.5x-equivalent framing fits all corners
-  const r = validateGeometry(s.pts, IMG_W, IMG_H);
+test('good paper quad passes', () => {
+  const s = wallScene({});
+  const r = validatePaperQuad(s.paper, IMG_W, IMG_H);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.ok(r.metrics.areaFrac > 0.002);
 });
 
-test('crossed floor edges are rejected with a specific message', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  [bad[2], bad[3]] = [bad[3], bad[2]]; // swap front-left / front-right
-  const r = validateGeometry(bad, IMG_W, IMG_H);
+test('crossed paper corners are rejected', () => {
+  const s = wallScene({});
+  const bad = [s.paper[0], s.paper[2], s.paper[1], s.paper[3]];
+  const r = validatePaperQuad(bad, IMG_W, IMG_H);
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.code === 'floor-shape' || e.code === 'perspective'), JSON.stringify(r.errors));
+  assert.ok(r.errors.some((e) => e.code === 'crossed'));
 });
 
-test('nearly identical points are rejected as duplicates', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  bad[1] = { x: bad[0].x + 3, y: bad[0].y + 3 };
-  const r = validateGeometry(bad, IMG_W, IMG_H);
+test('duplicate paper corners are rejected', () => {
+  const s = wallScene({});
+  const bad = [...s.paper];
+  bad[1] = { x: bad[0].x + 2, y: bad[0].y + 2 };
+  const r = validatePaperQuad(bad, IMG_W, IMG_H);
   assert.equal(r.ok, false);
   assert.ok(r.errors.some((e) => e.code === 'duplicate'));
 });
 
-test('top edge below the floor is rejected', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  bad[4] = { x: bad[0].x, y: bad[0].y + 200 }; // "top" below the floor
-  const r = validateGeometry(bad, IMG_W, IMG_H);
+test('paper too small in frame is rejected', () => {
+  const tiny = [
+    { x: 2000, y: 1500 }, { x: 2100, y: 1500 },
+    { x: 2100, y: 1580 }, { x: 2000, y: 1580 },
+  ];
+  const r = validatePaperQuad(tiny, IMG_W, IMG_H);
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.code === 'top-below'));
+  assert.ok(r.errors.some((e) => e.code === 'paper-small'));
 });
 
-test('points on the image border are rejected', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  bad[4] = { x: 2, y: 2 };
-  const r = validateGeometry(bad, IMG_W, IMG_H);
-  assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.code === 'border'));
-});
+// --------------------------------------------------------- pose checks
 
-test('wildly leaning wall edge is rejected', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  bad[4] = { x: bad[0].x - 1500, y: bad[0].y - 400 }; // top-left far to the side
-  const r = validateGeometry(bad, IMG_W, IMG_H);
-  assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.code === 'vertical-tilt' || e.code === 'vertical-mutual'));
-});
-
-test('segment intersection and convexity primitives', () => {
-  assert.equal(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 10, y: 0 }), true);
-  assert.equal(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 5 }, { x: 10, y: 5 }), false);
-  assert.equal(isConvexQuad([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]), true);
-  assert.equal(isConvexQuad([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }]), false);
-});
-
-// ------------------------------------------------------------ cross-checks
-
-function checksFor(pts, { exifFocal = null } = {}) {
-  const [bl, br, fl, fr] = pts;
-  const metro = rectangleMetrology([bl, br, fr, fl], IMG_W, IMG_H, { focalPx: exifFocal });
-  return crossChecks({
-    metro, pts, imgW: IMG_W, imgH: IMG_H,
-    exifFocal, homographyColumns: metro.Hcols,
-  });
+function checksFor(paperPts, { exifFocal = null } = {}) {
+  const plane = new PlaneMeasurement(paperPts);
+  return { plane, checks: paperPoseChecks(paperPts, IMG_W, IMG_H, { exifFocal, homographyColumns: plane.Hcols }) };
 }
 
-test('good geometry passes all cross-checks', () => {
-  const s = goodScene({ f: 1456 });
-  const r = checksFor(s.pts, { exifFocal: 1456 });
+test('true letter sheet passes pose checks; focal recovered', () => {
+  const s = wallScene({});
+  const { checks } = checksFor(s.paper, { exifFocal: 2900 });
+  assert.equal(checks.ok, true, JSON.stringify(checks.errors));
+  assert.ok(checks.metrics.orthoResidual < 0.02, `ortho ${checks.metrics.orthoResidual}`);
+  assert.ok(Math.abs(checks.metrics.normRatio - 1) < 0.02, `ratio ${checks.metrics.normRatio}`);
+  const fVP = focalFromVanishingPoints(s.paper, IMG_W / 2, IMG_H / 2);
+  if (fVP != null) assert.ok(Math.abs(fVP - 2900) / 2900 < 0.05, `fVP ${fVP}`);
+});
+
+test('starting on the SHORT edge is detected and rejected', () => {
+  const s = wallScene({});
+  // Rotate the tap order by one: user began along an 8.5-inch edge.
+  const swapped = [s.paper[1], s.paper[2], s.paper[3], s.paper[0]];
+  const { checks } = checksFor(swapped, { exifFocal: 2900 });
+  assert.equal(checks.ok, false, JSON.stringify(checks.metrics));
+  assert.ok(checks.errors.some((e) => e.code === 'edge-order'), JSON.stringify(checks.errors));
+});
+
+test('non-rectangular "sheet" taps are rejected', () => {
+  const s = wallScene({});
+  const bad = [...s.paper];
+  bad[2] = { x: bad[2].x + 260, y: bad[2].y + 200 }; // one corner far off the sheet
+  const { checks } = checksFor(bad, { exifFocal: 2900 });
+  assert.equal(checks.ok, false, JSON.stringify(checks.metrics));
+});
+
+// -------------------------------------------------------------- endpoints
+
+test('plane measurement + endpoint validation: exact width passes', () => {
+  const s = wallScene({});
+  const plane = new PlaneMeasurement(s.paper);
+  const a = s.px([-20, 0, 0]); // 40-inch span on the wall
+  const b = s.px([20, 0, 0]);
+  const v = plane.distance(a, b);
+  assert.ok(Math.abs(v - 40) < 1e-6, `v=${v}`);
+  const r = validateEndpoints([a, b], 'width', v, IMG_W, IMG_H, s.paper);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
-  assert.ok(r.metrics.heightDisagreePct < 1);
-  assert.ok(r.metrics.orthoResidual < 0.02, `ortho ${r.metrics.orthoResidual}`);
-  assert.ok(r.metrics.vertAngleLeftDeg < 2);
+  assert.ok(Number.isFinite(r.metrics.leverage));
 });
 
-test('vanishing-point focal matches the camera on a true rectangle', () => {
-  const s = goodScene({ f: 1456 });
-  const fVP = focalFromVanishingPoints(s.pts.slice(0, 4), IMG_W / 2, IMG_H / 2);
-  assert.ok(Math.abs(fVP - 1456) / 1456 < 0.01, `fVP=${fVP}`);
-});
-
-test('non-rectangular floor (couch-like) fails the rectangularity check', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  // Drag the front-right corner far inward — a footprint no rectangle explains.
-  bad[3] = { x: bad[3].x - 900, y: bad[3].y - 350 };
-  const r = checksFor(bad, { exifFocal: 1456 });
-  assert.equal(r.ok, false, JSON.stringify(r.metrics));
-  assert.ok(r.errors.some((e) => ['not-rectangle', 'vertical-inconsistent', 'height-disagree', 'height-unsolvable'].includes(e.code)),
-    JSON.stringify(r.errors));
-});
-
-test('misplaced top corner triggers left/right height disagreement', () => {
-  const s = goodScene({ f: 1456 });
-  const bad = [...s.pts];
-  bad[5] = { x: bad[5].x, y: bad[5].y + 500 }; // right top far too low
-  const r = checksFor(bad, { exifFocal: 1456 });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.code === 'height-disagree'), JSON.stringify(r.errors));
-  assert.ok(r.metrics.heightDisagreePct > 25);
-});
-
-// -------------------------------------------------------------- reference
-
-test('reference values are range-checked per dimension', () => {
-  assert.equal(validateReference('height', 96).ok, true);
-  assert.equal(validateReference('height', 200).ok, false);
-  assert.equal(validateReference('height', 200, { custom: true }).ok, true);
-  assert.equal(validateReference('height', 500, { custom: true }).ok, false);
-  assert.equal(validateReference('width', -5).ok, false);
-  assert.equal(validateReference('depth', NaN).ok, false);
-});
-
-// ---------------------------------------------------------------- results
-
-test('a 180-inch height is blocked, never displayed', () => {
-  const r = validateResult({ width: 40, height: 180, depth: 28 });
+test('a 180-inch height is blocked at the endpoint stage', () => {
+  const s = wallScene({});
+  const r = validateEndpoints([s.px([0, 0, 0]), s.px([0, 84, 0])], 'height', 180, IMG_W, IMG_H, s.paper);
   assert.equal(r.ok, false);
   assert.ok(r.errors.some((e) => e.code === 'implausible'));
 });
 
-test('wildly out-of-proportion dimensions are blocked', () => {
-  const r = validateResult({ width: 240, height: 8, depth: 100 });
+test('near-identical endpoints are rejected', () => {
+  const s = wallScene({});
+  const p = s.px([0, 40, 0]);
+  const r = validateEndpoints([p, { x: p.x + 4, y: p.y + 4 }], 'width', 36, IMG_W, IMG_H, s.paper);
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.code === 'implausible-ratio'));
+  assert.ok(r.errors.some((e) => e.code === 'endpoints-close'));
 });
 
-test('plausible closet passes; atypical size warns but passes', () => {
-  assert.equal(validateResult({ width: 40, height: 84, depth: 28 }).ok, true);
-  const wide = validateResult({ width: 110, height: 84, depth: 28 });
+// ---------------------------------------------------------------- results
+
+test('plausible dims pass; atypical warns; absurd ratio blocks', () => {
+  assert.equal(validateResultDims({ width: 40, height: 84, depth: 28 }).ok, true);
+  const wide = validateResultDims({ width: 110, height: 84, depth: 28 });
   assert.equal(wide.ok, true);
   assert.ok(wide.warnings.some((w) => w.code === 'atypical'));
-});
-
-test('implausible camera height produces a warning', () => {
-  const r = validateResult({ width: 40, height: 84, depth: 28 }, { camHeightIn: 8 });
-  assert.ok(r.warnings.some((w) => w.code === 'cam-height'));
-});
-
-// -------------------------------------------------------- scaling sanity
-
-test('one reference dimension scales the others exactly (ratios preserved)', () => {
-  const s = goodScene({ f: 1456 });
-  const [bl, br, fl, fr, tl, tr] = s.pts;
-  const metro = rectangleMetrology([bl, br, fr, fl], IMG_W, IMG_H, { focalPx: 1456 });
-  const raw = {
-    width: metro.distance(bl, br),
-    depth: metro.distance(bl, fl),
-    height: (metro.wallHeight(bl, br, tl) + metro.wallHeight(bl, br, tr)) / 2,
-  };
-  const scale = s.truth.H / raw.height; // user enters the height
-  assert.ok(Math.abs(raw.width * scale - s.truth.W) < 1e-6);
-  assert.ok(Math.abs(raw.depth * scale - s.truth.D) < 1e-6);
+  const absurd = validateResultDims({ width: 200, height: 8, depth: 100 });
+  assert.equal(absurd.ok, false);
 });
 
 // -------------------------------------------------------------- confidence
 
-test('clean scan scores High confidence', () => {
-  const c = confidence({
-    hasExifFocal: true, focalDisagreePct: 1, orthoResidual: 0.01,
-    heightDisagreePct: 1, vertAngleMaxDeg: 1, camPitchDeg: 20, megapixels: 12,
-  });
-  assert.equal(c.level, 'high');
-});
-
-test('no EXIF + disagreements degrade to Medium/Low with reasons', () => {
-  const c = confidence({
-    hasExifFocal: false, orthoResidual: 0.1, heightDisagreePct: 10,
-    vertAngleMaxDeg: 8, camPitchDeg: 20, megapixels: 12,
-  });
-  assert.ok(c.level !== 'high');
-  assert.ok(c.reasons.length >= 2);
-});
-
-test('badly conflicting evidence scores Low', () => {
-  const c = confidence({
-    hasExifFocal: false, orthoResidual: 0.2, heightDisagreePct: 20,
-    vertAngleMaxDeg: 15, camPitchDeg: 4, megapixels: 1,
-  });
-  assert.equal(c.level, 'low');
+test('clean view scores High; weak evidence degrades; overall = weakest view', () => {
+  const good = confidenceView({ paperAreaFrac: 0.02, orthoResidual: 0.01, normRatio: 1, leverage: 3, megapixels: 12, hasExifFocal: true });
+  assert.equal(good.level, 'high');
+  const bad = confidenceView({ paperAreaFrac: 0.001, orthoResidual: 0.15, normRatio: 0.85, leverage: 12, megapixels: 1, hasExifFocal: false });
+  assert.equal(bad.level, 'low');
+  assert.ok(bad.reasons.length >= 3);
+  const overall = confidenceOverall([good, bad]);
+  assert.equal(overall.level, 'low');
 });
 
 // ------------------------------------------------------------- formatting
 
-test('display formatting: quarter-inch default, distinct from 1/16 model formatting', () => {
-  assert.equal(toFraction(36.13), '36 1/4″'); // nearest 1/4
-  assert.equal(toFraction(36.05), '36″');
-  assert.equal(toFraction(36.13, 16), '36 1/8″'); // nearest 1/16 -> 2/16 reduces
-  assert.equal(ClosetModel.toFraction16(36.1875), '36 3/16″');
+test('1/16 fraction display and feet-inches display', () => {
+  assert.equal(toFraction(36.1875), '36 3/16″');
+  assert.equal(toFraction(36.02), '36″');
+  assert.equal(feetInches(84.25), '7′ 0 1/4″');
+  assert.equal(feetInches(10.5), '10 1/2″');
+  assert.equal(feetInches(83.9999999), '7′'); // rounding must carry into feet
+  assert.equal(feetInches(84), '7′');
 });
 
-test('error band grows with evidence of trouble and is capped', () => {
-  const good = errorBandPct({ heightDisagreePct: 1, orthoResidual: 0.01 }, true);
-  const bad = errorBandPct({ heightDisagreePct: 20, orthoResidual: 0.25, focalDisagreePct: 40 }, false);
-  assert.ok(good < bad);
-  assert.ok(bad <= 30);
+test('error band grows with leverage and residuals, capped', () => {
+  const near = errorBandPct({ leverage: 2, orthoResidual: 0.01 });
+  const far = errorBandPct({ leverage: 12, orthoResidual: 0.2, paperAreaFrac: 0.001 });
+  assert.ok(near < far);
+  assert.ok(far <= 15);
+});
+
+test('convexity primitive', () => {
+  assert.equal(isConvexQuad([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]), true);
+  assert.equal(isConvexQuad([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }]), false);
+});
+
+test('paper constants are the letter sheet', () => {
+  assert.equal(PAPER.LONG, 11);
+  assert.equal(PAPER.SHORT, 8.5);
 });
