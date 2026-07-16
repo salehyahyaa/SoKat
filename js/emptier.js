@@ -202,7 +202,7 @@ export class BeforeAfterView {
       a[i * 3 + 2] = mask[i] ? ab : cd.data[i * 4 + 2];
     }
     b.set(a);
-    for (let it = 0; it < 120; it++) {
+    for (let it = 0; it < 60; it++) {
       for (let y = 0; y < sh; y++) {
         for (let x = 0; x < sw; x++) {
           const i = y * sw + x;
@@ -224,6 +224,12 @@ export class BeforeAfterView {
       cd.data[i * 4 + 1] = a[i * 3 + 1];
       cd.data[i * 4 + 2] = a[i * 3 + 2];
     }
+
+    // Exemplar pass: re-texture the smooth diffusion base by stamping real
+    // patches copied from the unmasked surroundings — texture continues
+    // through the hole instead of turning into a smudge.
+    exemplarFill(cd.data, mask, sw, sh);
+
     sctx.putImageData(cd, 0, 0);
 
     // Keep only the (feathered) masked part of the fill, re-grain it so it
@@ -326,4 +332,134 @@ function cloneCanvas(src) {
   c.width = src.width; c.height = src.height;
   c.getContext('2d').drawImage(src, 0, 0);
   return c;
+}
+
+// Exemplar-based texture synthesis over an inpaint mask (data: RGBA bytes).
+// Grid points across the mask are filled boundary-first; each takes the
+// best-matching (SSD against already-known context) of K randomly sampled
+// patches from the unmasked surroundings, stamped with a feathered edge.
+// Classical content-aware-fill: real pixels, so grain and texture continue.
+function exemplarFill(data, mask, sw, sh) {
+  const n = sw * sh;
+  const src = new Uint8ClampedArray(data); // patch source: pre-stamp snapshot
+
+  // BFS distance-to-known so the fill grows inward from the boundary.
+  const dist = new Int32Array(n).fill(-1);
+  let queue = [];
+  for (let i = 0; i < n; i++) if (!mask[i]) { dist[i] = 0; queue.push(i); }
+  if (queue.length === 0 || queue.length === n) return;
+  while (queue.length) {
+    const next = [];
+    for (const i of queue) {
+      const x = i % sw; const y = (i / sw) | 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < sw - 1 ? i + 1 : -1, y > 0 ? i - sw : -1, y < sh - 1 ? i + sw : -1]) {
+        if (j >= 0 && dist[j] < 0) { dist[j] = dist[i] + 1; next.push(j); }
+      }
+    }
+    queue = next;
+  }
+
+  const PR = Math.max(5, Math.round(Math.min(sw, sh) / 12)); // patch radius
+  const STEP = Math.max(2, Math.round(PR * 0.75));
+  const K = 12;
+
+  // Source candidates: unmasked centers with a fully in-bounds patch.
+  const validSource = (i) => {
+    const x = i % sw; const y = (i / sw) | 0;
+    return x >= PR && x < sw - PR && y >= PR && y < sh - PR
+      && !mask[i] && !mask[i - PR] && !mask[i + PR] && !mask[i - PR * sw] && !mask[i + PR * sw];
+  };
+  const sources = [];
+  for (let y = PR; y < sh - PR; y += 2) {
+    for (let x = PR; x < sw - PR; x += 2) {
+      const i = y * sw + x;
+      if (validSource(i)) sources.push(i);
+    }
+  }
+  if (sources.length === 0) return;
+
+  // Grid targets over the mask, nearest-to-boundary first.
+  const targets = [];
+  for (let y = 0; y < sh; y += STEP) {
+    for (let x = 0; x < sw; x += STEP) {
+      const i = y * sw + x;
+      if (mask[i]) targets.push(i);
+    }
+  }
+  targets.sort((p, q) => dist[p] - dist[q]);
+
+  const known = new Uint8Array(n); // original known context + stamped areas
+  for (let i = 0; i < n; i++) known[i] = mask[i] ? 0 : 1;
+
+  // PatchMatch-style propagation: neighbors reuse each other's source
+  // offsets, so periodic structure (planks, tiles, stripes) continues in
+  // phase through the hole instead of averaging into a blur. Three sweeps:
+  // boundary-first to seed, then scanline and reverse-scanline to let good
+  // offsets flow across the whole hole.
+  const offsets = new Map(); // "gx,gy" -> chosen (source - target) offset
+  const sweeps = [
+    targets,
+    [...targets].sort((p, q) => p - q),
+    [...targets].sort((p, q) => q - p),
+  ];
+  for (const sweep of sweeps) for (const t of sweep) {
+    const tx = t % sw; const ty = (t / sw) | 0;
+    const gx = (tx / STEP) | 0; const gy = (ty / STEP) | 0;
+    const candidates = [];
+    for (const [nx, ny] of [[gx - 1, gy], [gx + 1, gy], [gx, gy - 1], [gx, gy + 1]]) {
+      const off = offsets.get(nx + ',' + ny);
+      if (off != null) {
+        const c = t + off;
+        if (c >= 0 && c < n && validSource(c)) candidates.push(c);
+      }
+    }
+    for (let k = 0; k < K; k++) candidates.push(sources[(Math.random() * sources.length) | 0]);
+
+    let best = -1; let bestScore = Infinity;
+    for (const c of candidates) {
+      const cx = c % sw; const cy = (c / sw) | 0;
+      let score = 0; let cnt = 0;
+      for (let dy = -PR; dy <= PR; dy += 2) {
+        const y2 = ty + dy;
+        if (y2 < 0 || y2 >= sh) continue;
+        for (let dx = -PR; dx <= PR; dx += 2) {
+          const x2 = tx + dx;
+          if (x2 < 0 || x2 >= sw) continue;
+          const ti = y2 * sw + x2;
+          if (!known[ti]) continue;
+          const si = (cy + dy) * sw + (cx + dx);
+          const dr = data[ti * 4] - src[si * 4];
+          const dg = data[ti * 4 + 1] - src[si * 4 + 1];
+          const db = data[ti * 4 + 2] - src[si * 4 + 2];
+          score += dr * dr + dg * dg + db * db;
+          cnt++;
+        }
+      }
+      score = cnt ? score / cnt : Math.random() * 1e6;
+      if (score < bestScore) { bestScore = score; best = c; }
+    }
+    if (best < 0) continue;
+    offsets.set(gx + ',' + gy, best - t);
+    const bx = best % sw; const by = (best / sw) | 0;
+    for (let dy = -PR; dy <= PR; dy++) {
+      const y2 = ty + dy;
+      if (y2 < 0 || y2 >= sh) continue;
+      for (let dx = -PR; dx <= PR; dx++) {
+        const x2 = tx + dx;
+        if (x2 < 0 || x2 >= sw) continue;
+        const ti = y2 * sw + x2;
+        if (!mask[ti]) continue; // never touch real photo pixels
+        const r2 = (dx * dx + dy * dy) / (PR * PR);
+        if (r2 > 1) continue;
+        // full copy in the patch core; feather only the rim so texture stays crisp
+        const rim = r2 < 0.55 ? 1 : (1 - r2) / 0.45;
+        const w = known[ti] ? rim * 0.95 : 1;
+        const si = ((by + dy) * sw + (bx + dx)) * 4;
+        data[ti * 4] = data[ti * 4] * (1 - w) + src[si] * w;
+        data[ti * 4 + 1] = data[ti * 4 + 1] * (1 - w) + src[si + 1] * w;
+        data[ti * 4 + 2] = data[ti * 4 + 2] * (1 - w) + src[si + 2] * w;
+        known[ti] = 1;
+      }
+    }
+  }
 }
