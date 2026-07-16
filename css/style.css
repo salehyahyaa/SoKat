@@ -211,3 +211,15 @@ button:active:not(:disabled) { transform: scale(0.98); }
 #erase-bar[hidden] { display: none; }
 #erase-bar .seg-btn { background: var(--panel); }
 #erase-bar .seg-btn.active { background: rgba(0, 229, 160, 0.18); color: var(--accent); }
+
+/* ---------- pick: corner guide diagram ---------- */
+.pick-head { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
+#guide-canvas {
+  width: 64px; height: 64px; flex: 0 0 auto;
+  background: var(--panel); border-radius: 10px;
+}
+.pick-head p { flex: 1; margin-top: 0; }
+
+/* ---------- results: tap-to-correct dims ---------- */
+.dim-card { cursor: pointer; }
+.dim-edit { color: var(--muted); font-size: 0.62rem; margin-top: 4px; }

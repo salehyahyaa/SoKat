@@ -2,12 +2,13 @@
  * SpaceScanApp — orchestrator. Owns the screen state machine and wires the
  * capture → measure → scale → render pipeline together.
  *
- * The whole scan is ONE photo, 6 corner taps, and ONE typed number:
- *   photograph the space/object → tap its 6 corners (floor footprint
- *   assumed rectangular + the two top corners) → rectangle metrology
- *   recovers every dimension ratio from the perspective (EXIF focal when
- *   available) → the user enters ONE length they know (e.g. ceiling height)
- *   which sets the absolute scale for all three dimensions.
+ * The whole scan is ONE photo and 6 corner taps — nothing else:
+ *   photograph the space/object → tap its 6 corners (a diagram highlights
+ *   which corner each tap is) → rectangle metrology recovers every dimension
+ *   ratio from the perspective (EXIF focal when available) → absolute scale
+ *   is inferred from the camera's recovered height above the floor (typical
+ *   phone-holding height). Tapping a dimension on the results screen
+ *   corrects it and rescales the others.
  *   Results: dimensions, the photo with an object-eraser brush (paint over
  *   anything to remove it — inpainted from the surrounding pixels), and a
  *   rotatable 3D model of the space.
@@ -25,13 +26,19 @@ const HOME = Symbol('home');
 const TARGET_COLOR = '#00e5a0';
 
 const LABELS = [
-  'floor BACK-LEFT corner (floor meets the back)',
-  'floor BACK-RIGHT corner',
-  'floor FRONT-LEFT corner (front edge)',
-  'floor FRONT-RIGHT corner',
-  'TOP-LEFT corner (top of the back)',
-  'TOP-RIGHT corner',
+  'BACK-LEFT floor corner',
+  'BACK-RIGHT floor corner',
+  'FRONT-LEFT floor corner',
+  'FRONT-RIGHT floor corner',
+  'TOP-LEFT of the back',
+  'TOP-RIGHT of the back',
 ];
+
+// How high people typically hold a phone when photographing a room. The
+// camera's height above the floor comes out of the pose recovery in scene
+// units, so this one assumption sets the absolute scale with no user input.
+// Tapping a dimension on the results screen corrects it (and the others).
+const ASSUMED_PHONE_HEIGHT_IN = 57;
 
 export class SpaceScanApp {
   constructor(doc = document) {
@@ -50,6 +57,7 @@ export class SpaceScanApp {
     });
     this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
+    this.$('dims').addEventListener('click', (e) => this.onDimTap(e));
 
     this.showScreen('welcome');
   }
@@ -148,12 +156,13 @@ export class SpaceScanApp {
       const update = (picker) => {
         btnNext.disabled = !picker.complete;
         const n = picker.points.length;
+        drawGuide(this.$('guide-canvas'), picker.complete ? -1 : n);
         // Keep this short & stable — long wrapping text here resizes the
         // header and shifts the photo under the user's finger between taps.
         const coach = n === 0 ? ' (slide to align in the loupe, lift to set)' : '';
         instruction.textContent = picker.complete
           ? `✓ All ${labels.length} set — ${doneText || 'drag any point to fine-tune, then tap Next'}`
-          : `${n + 1} of ${labels.length}: tap the ${labels[n]}${coach}`;
+          : `${n + 1} of ${labels.length}: tap the ${labels[n]} \u2014 the green dot in the diagram${coach}`;
       };
       const picker = new CornerPicker(canvas, photo, {
         count: labels.length,
@@ -186,11 +195,10 @@ export class SpaceScanApp {
 
   async runScan() {
     const scan = await this.stepScan();
-    const model = await this.askScale(scan.raw);
     await this.withLoading(
       'Calculating dimensions…',
       'Solving the 3D geometry from your corners',
-      async () => this.showResults({ ...scan, model }),
+      async () => this.showResults(scan),
       1200,
     );
   }
@@ -216,19 +224,24 @@ export class SpaceScanApp {
           focalPx: photo.focalPx || null,
         });
         const backQuad = [tl, tr, br, bl]; // used only to sample a wall tint
+        // The pose recovery yields the camera's height above the floor in
+        // scene units — one assumption about how high a phone is held turns
+        // that into absolute inches, with no user input at all.
+        const camHeightUnits = Math.abs(metro.C[2]);
+        if (!(camHeightUnits > 1e-6)) throw new Error('Could not recover the camera position — retake the photo');
         return {
-          // Every ratio is right; the absolute scale comes from askScale().
           raw: {
             width: metro.distance(bl, br),
             depth: metro.distance(bl, fl),
             heightLeft: metro.wallHeight(bl, br, tl),
             heightRight: metro.wallHeight(bl, br, tr),
           },
+          scale: ASSUMED_PHONE_HEIGHT_IN / camHeightUnits,
           photo,
           wallColor: sampleWallColor(photo, backQuad),
           note: photo.focalPx
-            ? 'One-photo scan, scaled from the length you entered'
-            : 'One-photo scan (no camera EXIF — accuracy reduced), scaled from the length you entered',
+            ? ''
+            : ' · no camera EXIF in this photo — accuracy reduced',
         };
       } catch (err) {
         alert(`${err.message || err}`);
@@ -236,78 +249,73 @@ export class SpaceScanApp {
     }
   }
 
-  // The one number the math cannot know from pixels: a real length. The user
-  // enters whichever dimension they know (ceiling height is the usual one)
-  // and every other dimension scales from it.
-  askScale(raw) {
-    this.showScreen('scale');
-    const height = (raw.heightLeft + raw.heightRight) / 2;
-    const rows = [
-      { id: 'scale-h', dim: 'height', raw: height },
-      { id: 'scale-w', dim: 'width', raw: raw.width },
-      { id: 'scale-d', dim: 'depth', raw: raw.depth },
-    ];
-    const btn = this.$('btn-scale-done');
-    const inputs = rows.map((r) => this.$(r.id));
-    inputs.forEach((el) => { el.value = ''; });
+  // --------------------------------------------------------------- results
 
-    return new Promise((resolve) => {
-      const firstFilled = () => {
-        for (let i = 0; i < rows.length; i++) {
-          const v = parseFloat(inputs[i].value);
-          if (Number.isFinite(v) && v > 0) return { ...rows[i], value: v };
-        }
-        return null;
-      };
-      const update = () => { btn.disabled = !firstFilled(); };
-      const onDone = () => {
-        const known = firstFilled();
-        if (!known) return;
-        cleanup();
-        const scale = known.value / known.raw;
-        resolve(new ClosetModel({
-          widthTop: raw.width * scale,
-          widthBottom: raw.width * scale,
-          heightLeft: raw.heightLeft * scale,
-          heightRight: raw.heightRight * scale,
-          depth: raw.depth * scale,
-        }));
-      };
-      const cleanup = () => {
-        btn.removeEventListener('click', onDone);
-        inputs.forEach((el) => el.removeEventListener('input', update));
-      };
-      btn.addEventListener('click', onDone);
-      inputs.forEach((el) => el.addEventListener('input', update));
-      update();
+  buildModel() {
+    const { raw, scale } = this.current;
+    return new ClosetModel({
+      widthTop: raw.width * scale,
+      widthBottom: raw.width * scale,
+      heightLeft: raw.heightLeft * scale,
+      heightRight: raw.heightRight * scale,
+      depth: raw.depth * scale,
     });
   }
 
-  // --------------------------------------------------------------- results
-
-  showResults({ model, photo, wallColor, note }) {
-    this.showScreen('results');
+  renderDims() {
+    const model = this.buildModel();
+    this.resultsModel = model;
     this.$('dims').innerHTML = [
-      dimCard('Width', model.widthText),
-      dimCard('Height', model.heightText),
-      dimCard('Depth', model.depthText),
+      dimCard('Width', model.widthText, 'width'),
+      dimCard('Height', model.heightText, 'height'),
+      dimCard('Depth', model.depthText, 'depth'),
     ].join('');
 
     const spreadText = ClosetModel.toFraction16(model.maxSpread);
     const consistency = model.isConsistent
       ? `<span class="ok">✓ Consistency check passed</span> — paired readings agree within ${spreadText}`
       : `<span class="warn">⚠ Paired readings differ by ${spreadText}</span> — refine your corner taps or retake the photo`;
-    this.$('diagnostics').innerHTML = `${consistency}<br>${note}`;
+    const scaleNote = this.current.corrected
+      ? `scale set from the ${this.current.corrected} you entered`
+      : 'auto-scale from phone height — tap any dimension to correct it, the others follow';
+    this.$('diagnostics').innerHTML = `${consistency}<br>${scaleNote}${this.current.note}`;
 
+    // Rescaling changes the 3D model; rebuild the renderer lazily.
     if (this.renderer) { this.renderer.destroy(); this.renderer = null; }
-    if (this.compareView) { this.compareView.destroy(); this.compareView = null; }
-    this.resultsModel = model;
+    if (this.$('scene-canvas').hidden === false) this.setResultsView('3d');
+  }
+
+  showResults({ raw, scale, photo, wallColor, note }) {
+    this.current = { raw, scale, note, corrected: null };
+    this.showScreen('results');
     this.resultsWallColor = wallColor;
+
+    if (this.compareView) { this.compareView.destroy(); this.compareView = null; }
     if (photo) {
       this.compareView = new BeforeAfterView(this.$('compare-canvas'), buildEmptiedViews(photo));
     }
     this.$('btn-erase').classList.remove('active');
+    this.renderDims();
     this.setResultsView(this.compareView ? 'photo' : '3d');
+  }
+
+  // Tap a dimension card to correct it; the other dimensions rescale from
+  // the same factor (the proportions from the photo are already right).
+  onDimTap(e) {
+    const card = e.target.closest('.dim-card');
+    if (!card || !this.current) return;
+    const dim = card.dataset.dim;
+    const raw = this.current.raw;
+    const rawValue = dim === 'width' ? raw.width
+      : dim === 'depth' ? raw.depth
+      : (raw.heightLeft + raw.heightRight) / 2;
+    const answer = prompt(`Enter the real ${dim} in inches — everything rescales from it:`);
+    if (answer == null) return;
+    const value = parseFloat(answer);
+    if (!Number.isFinite(value) || value <= 0) return;
+    this.current.scale = value / rawValue;
+    this.current.corrected = dim;
+    this.renderDims();
   }
 
   // Erase mode: drag over any other object in the emptied photo to wipe it.
@@ -348,8 +356,38 @@ export class SpaceScanApp {
   }
 }
 
-function dimCard(label, value) {
-  return `<div class="dim-card"><div class="dim-label">${label}</div><div class="dim-value">${value}</div></div>`;
+function dimCard(label, value, dim) {
+  return `<div class="dim-card" data-dim="${dim}"><div class="dim-label">${label}</div>`
+    + `<div class="dim-value">${value}</div><div class="dim-edit">tap to correct</div></div>`;
+}
+
+// Tiny 3D guide next to the tap instructions: a wireframe of the space with
+// the corner to tap highlighted -- clearer than any wording.
+function drawGuide(canvas, index) {
+  const ctx = canvas.getContext('2d');
+  const S = 2; // 128px backing for a 64px box
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // corner positions: back floor L/R, front floor L/R, back top L/R
+  const corners = [
+    [18, 42], [46, 42], [8, 56], [56, 56], [18, 8], [46, 8],
+  ].map(([x, y]) => [x * S, y * S]);
+  ctx.strokeStyle = '#5b6b80';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  // back wall
+  ctx.moveTo(...corners[4]); ctx.lineTo(...corners[5]);
+  ctx.lineTo(...corners[1]); ctx.lineTo(...corners[0]); ctx.closePath();
+  // floor
+  ctx.moveTo(...corners[0]); ctx.lineTo(...corners[2]); ctx.lineTo(...corners[3]); ctx.lineTo(...corners[1]);
+  ctx.stroke();
+  if (index >= 0 && index < 6) {
+    const [x, y] = corners[index];
+    ctx.fillStyle = '#00e5a0';
+    ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.stroke();
+  }
 }
 
 // Sample a plausible wall tint just outside the back-wall quad's corners so

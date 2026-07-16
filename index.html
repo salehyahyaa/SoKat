@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — measure any space with your iPhone</title>
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <main id="app">
@@ -44,7 +44,10 @@
     <section id="screen-pick" class="screen no-pad">
       <header class="bar">
         <h2 id="pick-title"></h2>
-        <p id="pick-instruction"></p>
+        <div class="pick-head">
+          <canvas id="guide-canvas" width="128" height="128"></canvas>
+          <p id="pick-instruction"></p>
+        </div>
       </header>
       <canvas id="pick-canvas"></canvas>
       <footer class="bar buttons">
@@ -52,25 +55,6 @@
         <button id="btn-undo" class="secondary">Undo</button>
         <button id="btn-next" class="primary" disabled>Next</button>
       </footer>
-    </section>
-
-    <!-- Scale: the one number pixels can't provide -->
-    <section id="screen-scale" class="screen">
-      <header class="bar">
-        <h2>One last thing — set the scale</h2>
-      </header>
-      <p class="body-text">
-        The photo gives every <b>proportion</b>, but pixels can't know real-world
-        size. Enter <b>any ONE</b> length you know and the rest is calculated:
-      </p>
-      <div class="acc-grid">
-        <div class="acc-row"><span>Height (ceilings are often 96″)</span><input id="scale-h" type="number" inputmode="decimal" min="0" placeholder="e.g. 96"> ″</div>
-        <div class="acc-row"><span>or Width</span><input id="scale-w" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
-        <div class="acc-row"><span>or Depth</span><input id="scale-d" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
-      </div>
-      <div class="stack push-down">
-        <button id="btn-scale-done" class="primary" disabled>Show dimensions</button>
-      </div>
     </section>
 
     <!-- Results -->
@@ -111,6 +95,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=5"></script>
+  <script type="module" src="js/app.js?v=6"></script>
 </body>
 </html>
