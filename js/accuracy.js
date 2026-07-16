@@ -1,6 +1,6 @@
 import { PlaneMeasurement } from './measurement.js';
 
-/** The challenge's accuracy target: 1/16 inch. */
+// The challenge's accuracy target: 1/16 inch.
 export const TARGET_IN = 1 / 16;
 
 /**
@@ -12,21 +12,17 @@ export const TARGET_IN = 1 / 16;
  * display its own error in sixteenths, live.
  */
 export class AccuracyChecker {
-  /** @param {{x:number,y:number}[]} refCornersPx calibration sheet corners (image px) */
+  // refCornersPx: calibration sheet corners (image px).
   constructor(refCornersPx) {
     this.plane = new PlaneMeasurement(refCornersPx);
   }
 
-  /** Measured distance in inches between two tapped image points. */
+  // Measured inches between two tapped image points.
   measure(p1, p2) {
     return this.plane.distance(p1, p2);
   }
 
-  /**
-   * Build an error report against a known true length.
-   * @param {number} measuredIn
-   * @param {number} trueIn
-   */
+  // Error report against a known true length.
   static report(measuredIn, trueIn) {
     const errorIn = measuredIn - trueIn;
     return {

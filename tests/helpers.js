@@ -7,16 +7,10 @@
  * against closets whose dimensions are known to infinite precision.
  */
 
-/** Pinhole camera with look-at orientation. World units: inches. */
+// Pinhole camera with look-at orientation. World units: inches.
 export class PinholeCamera {
-  /**
-   * @param {object} o
-   * @param {number[]} o.eye     camera position [x,y,z]
-   * @param {number[]} o.target  look-at point
-   * @param {number[]} [o.up]
-   * @param {number} [o.f]       focal length in pixels (~2900 for iPhone main camera)
-   * @param {number} [o.cx] @param {number} [o.cy] principal point
-   */
+  // eye/target: position and look-at point; f: focal length in pixels
+  // (~2900 for the iPhone main camera); cx/cy: principal point.
   constructor({ eye, target, up = [0, 1, 0], f = 2900, cx = 2016, cy = 1512 }) {
     this.eye = eye;
     this.f = f;
@@ -27,7 +21,7 @@ export class PinholeCamera {
     this.trueUp = cross(this.right, this.forward);
   }
 
-  /** Project world point [x,y,z] to image pixels {x,y} (y grows downward). */
+  // Project world point [x,y,z] to image pixels {x,y} (y grows downward).
   project(p) {
     const d = sub(p, this.eye);
     const xc = dot(d, this.right);
@@ -38,10 +32,8 @@ export class PinholeCamera {
   }
 }
 
-/**
- * A letter-size sheet on the back wall (plane z=0, y up), landscape.
- * Returns its corners in world coords, in the app's tap order: TL, TR, BR, BL.
- */
+// Letter sheet on the back wall (plane z=0, y up), landscape; corners in the
+// app's tap order: TL, TR, BR, BL.
 export function paperOnWall(centerX, centerY) {
   return [
     [centerX - 5.5, centerY + 4.25, 0],
@@ -51,10 +43,7 @@ export function paperOnWall(centerX, centerY) {
   ];
 }
 
-/**
- * Back-wall corners of a closet of width W and height H (floor at y=0),
- * in the app's tap order: TL, TR, BR, BL.
- */
+// Back-wall corners of a W x H closet (floor at y=0), tap order TL, TR, BR, BL.
 export function closetBackWall(W, H) {
   return [
     [-W / 2, H, 0],
@@ -64,10 +53,8 @@ export function closetBackWall(W, H) {
   ];
 }
 
-/**
- * A letter-size sheet lying on the floor (plane y=0), long edge along z.
- * Corner order matches the app instruction: around the sheet, long edge first.
- */
+// Letter sheet flat on the floor (plane y=0), long edge along z; corner order
+// matches the app instruction (around the sheet, long edge first).
 export function paperOnFloor(centerX, centerZ) {
   return [
     [centerX - 4.25, 0, centerZ - 5.5],
@@ -77,7 +64,7 @@ export function paperOnFloor(centerX, centerZ) {
   ];
 }
 
-/** Deterministic PRNG (mulberry32) so noise tests are reproducible in CI. */
+// Deterministic PRNG (mulberry32) so noise tests are reproducible in CI.
 export function seededRandom(seed) {
   let a = seed >>> 0;
   return function next() {
@@ -88,7 +75,7 @@ export function seededRandom(seed) {
   };
 }
 
-/** Gaussian noise via Box–Muller on a seeded uniform PRNG. */
+// Gaussian noise via Box–Muller on a seeded uniform PRNG.
 export function gaussian(rand) {
   let u = 0; let v = 0;
   while (u === 0) u = rand();
@@ -96,7 +83,7 @@ export function gaussian(rand) {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-/** Add isotropic gaussian pixel noise (σ px) to a point. */
+// Add isotropic gaussian pixel noise (σ px) to a point.
 export function jitter(pt, sigma, rand) {
   return { x: pt.x + gaussian(rand) * sigma, y: pt.y + gaussian(rand) * sigma };
 }

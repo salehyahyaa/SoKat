@@ -11,16 +11,7 @@
  * resolution), independent of screen scale — screen zoom never costs accuracy.
  */
 export class CornerPicker {
-  /**
-   * @param {HTMLCanvasElement} canvas   display canvas (CSS-sized by layout)
-   * @param {HTMLCanvasElement} photo    source photo at full resolution
-   * @param {object} opts
-   * @param {number} opts.count          number of points to collect
-   * @param {string} opts.color          marker color
-   * @param {{points:{x:number,y:number}[], color:string}[]} [opts.ghosts]
-   *        previously placed point sets to show for context (not editable)
-   * @param {(picker: CornerPicker) => void} [opts.onChange]
-   */
+  // ghosts: previously placed point sets shown for context (not editable).
   constructor(canvas, photo, { count, color = '#00e5a0', ghosts = [], onChange = null }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -69,7 +60,7 @@ export class CornerPicker {
     }
   }
 
-  /** Compute the contain-fit transform between photo pixels and canvas pixels. */
+  // Contain-fit transform between photo pixels and canvas pixels.
   layout() {
     const rect = this.canvas.getBoundingClientRect();
     this.canvas.width = Math.round(rect.width * this.dpr);
@@ -146,7 +137,7 @@ export class CornerPicker {
     if (this.onChange) this.onChange(this);
   }
 
-  /** @param {{x:number,y:number}|null} fingerPos canvas-px finger position while dragging */
+  // fingerPos: canvas-px finger position while dragging (shows the loupe).
   render(fingerPos = null) {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);

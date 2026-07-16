@@ -14,12 +14,9 @@
  * "Open Camera" button stays armed for another try.
  */
 export class CameraCapture {
-  /** @param {HTMLInputElement} inputEl hidden file input with capture attribute */
   constructor(inputEl) {
     this.input = inputEl;
-    /** @type {((photo: HTMLCanvasElement) => void)|null} */
-    this.onPhoto = null;
-    /** @type {((err: Error) => void)|null} */
+    this.onPhoto = null; // set by the active capture screen
     this.onError = null;
     this.input.addEventListener('change', async () => {
       const file = this.input.files && this.input.files[0];
@@ -34,24 +31,19 @@ export class CameraCapture {
     });
   }
 
-  /** Open the camera. Must be called from a user-gesture handler. */
+  // Open the camera; must be called from a user-gesture handler.
   request() {
     this.input.click();
   }
 
-  /** Detach current subscribers (call when leaving a capture screen). */
+  // Detach subscribers when leaving a capture screen.
   unsubscribe() {
     this.onPhoto = null;
     this.onError = null;
   }
 
-  /**
-   * Decode an image file to a canvas. Browsers apply EXIF orientation when
-   * decoding into an <img>, so drawing that image yields upright pixels.
-   * Downscales only if the image exceeds Safari's canvas area limit.
-   * @param {File} file
-   * @returns {Promise<HTMLCanvasElement>}
-   */
+  // Decode a photo file to a canvas. <img> decoding applies EXIF orientation,
+  // so pixels come out upright; downscales only past Safari's canvas limit.
   static async fileToCanvas(file) {
     const url = URL.createObjectURL(file);
     try {

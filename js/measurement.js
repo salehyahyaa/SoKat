@@ -1,6 +1,6 @@
 import { Homography } from './homography.js';
 
-/** US Letter paper, landscape. Manufactured tolerance is well under 1/64". */
+// US Letter paper, landscape; manufactured tolerance is well under 1/64".
 export const REF_LONG_IN = 11.0;
 export const REF_SHORT_IN = 8.5;
 
@@ -14,12 +14,8 @@ export const REF_SHORT_IN = 8.5;
  * homography between the image and the physical plane.
  */
 export class PlaneMeasurement {
-  /**
-   * @param {{x:number,y:number}[]} refCornersPx 4 tapped corners of the reference
-   *   sheet in image pixels, in order around the sheet starting along a long edge.
-   * @param {number} longIn  real length of the first tapped edge (default 11")
-   * @param {number} shortIn real length of the adjacent edge (default 8.5")
-   */
+  // refCornersPx: 4 tapped sheet corners (image px), ordered around the
+  // sheet starting along a long edge.
   constructor(refCornersPx, longIn = REF_LONG_IN, shortIn = REF_SHORT_IN) {
     const world = [
       { x: 0, y: 0 },
@@ -30,12 +26,12 @@ export class PlaneMeasurement {
     this.homography = Homography.solve(refCornersPx, world);
   }
 
-  /** Map an image-pixel point to plane coordinates in inches. */
+  // Image-pixel point -> plane coordinates in inches.
   toWorld(px) {
     return this.homography.map(px);
   }
 
-  /** Real-world distance in inches between two image-pixel points on the plane. */
+  // Real-world inches between two image-pixel points on the plane.
   distance(p1, p2) {
     const a = this.toWorld(p1);
     const b = this.toWorld(p2);

@@ -6,17 +6,11 @@
  * partial pivoting. Pure math, no DOM — unit-tested in CI.
  */
 export class Homography {
-  /** @param {number[][]} matrix 3x3 homography matrix */
   constructor(matrix) {
     this.m = matrix;
   }
 
-  /**
-   * Solve the homography that maps src[i] -> dst[i] for 4 point pairs.
-   * @param {{x:number,y:number}[]} src 4 points in the source plane
-   * @param {{x:number,y:number}[]} dst 4 corresponding points in the destination plane
-   * @returns {Homography}
-   */
+  // Solve the homography mapping src[i] -> dst[i] (4 point pairs each).
   static solve(src, dst) {
     if (src.length !== 4 || dst.length !== 4) {
       throw new Error('Homography.solve requires exactly 4 point pairs');
@@ -39,11 +33,7 @@ export class Homography {
     ]);
   }
 
-  /**
-   * Map a point through the homography (with perspective divide).
-   * @param {{x:number,y:number}} p
-   * @returns {{x:number,y:number}}
-   */
+  // Map a point {x, y} through the homography (perspective divide).
   map(p) {
     const m = this.m;
     const w = m[2][0] * p.x + m[2][1] * p.y + m[2][2];
@@ -57,12 +47,7 @@ export class Homography {
   }
 }
 
-/**
- * Solve A x = b by Gaussian elimination with partial pivoting.
- * @param {number[][]} A n x n matrix (mutated)
- * @param {number[]} b length-n vector (mutated)
- * @returns {number[]} x
- */
+// Solve A x = b by Gaussian elimination with partial pivoting (mutates A and b).
 function gaussianSolve(A, b) {
   const n = A.length;
   for (let col = 0; col < n; col++) {

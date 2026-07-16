@@ -6,15 +6,8 @@
  * Own perspective projection on Canvas 2D — one box interior does not justify
  * a 3D engine dependency.
  */
-import { ClosetModel } from './closet-model.js';
-
 export class EmptyClosetRenderer {
-  /**
-   * @param {HTMLCanvasElement} canvas
-   * @param {ClosetModel} model
-   * @param {object} [opts]
-   * @param {string} [opts.wallColor] CSS color sampled from the real closet wall
-   */
+  // wallColor: CSS color sampled from the real closet wall.
   constructor(canvas, model, { wallColor = '#b8b0a4' } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -61,7 +54,7 @@ export class EmptyClosetRenderer {
     this.canvas.height = Math.round(rect.height * this.dpr);
   }
 
-  /** Rotate a box-space point by yaw/pitch and project to canvas pixels. */
+  // Rotate a box-space point by yaw/pitch and project to canvas pixels.
   project(p) {
     const cy = Math.cos(this.yaw); const sy = Math.sin(this.yaw);
     const cp = Math.cos(this.pitch); const sp = Math.sin(this.pitch);

@@ -135,3 +135,69 @@ button:active:not(:disabled) { transform: scale(0.98); }
 }
 .badge.pass { background: rgba(0, 229, 160, 0.15); color: var(--accent); }
 .badge.fail { background: rgba(255, 107, 107, 0.15); color: var(--danger); }
+
+/* ---------- results: view toggle & compare ---------- */
+.seg {
+  display: flex; gap: 6px;
+  margin: 0 16px 8px;
+  background: var(--panel); border-radius: 12px; padding: 4px;
+}
+.seg-btn {
+  flex: 1; padding: 10px 8px;
+  font-size: 0.9rem; font-weight: 600;
+  background: transparent; color: var(--muted);
+  border-radius: 9px;
+}
+.seg-btn.active { background: #26303e; color: var(--text); }
+
+#view-area { flex: 1; min-height: 0; position: relative; }
+#compare-canvas, #scene-canvas {
+  width: 100%; height: 100%;
+  touch-action: none;
+  display: block;
+}
+#compare-canvas[hidden], #scene-canvas[hidden] { display: none; }
+
+/* ---------- pick: draw attention to an enabled Next ---------- */
+#btn-next:not(:disabled) { animation: next-pulse 1.4s ease-in-out infinite; }
+@keyframes next-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 229, 160, 0.55); }
+  50% { box-shadow: 0 0 0 9px rgba(0, 229, 160, 0); }
+}
+
+/* ---------- loading overlay ---------- */
+#loading-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(6, 8, 12, 0.82);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+#loading-overlay.active { display: flex; animation: overlay-in 0.18s ease-out; }
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+.loading-box { text-align: center; padding: 0 32px; }
+#loading-title { font-size: 1.15rem; font-weight: 700; margin-top: 18px; }
+#loading-sub { color: var(--muted); font-size: 0.95rem; line-height: 1.4; margin-top: 8px; }
+
+.spinner {
+  width: 52px; height: 52px; margin: 0 auto;
+  border-radius: 50%;
+  border: 4px solid rgba(0, 229, 160, 0.18);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-check {
+  display: none;
+  width: 52px; height: 52px; margin: 0 auto;
+  border-radius: 50%;
+  background: rgba(0, 229, 160, 0.15); color: var(--accent);
+  font-size: 1.8rem; font-weight: 800; line-height: 52px;
+  animation: check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes check-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+#loading-overlay.done .spinner { display: none; }
+#loading-overlay.done .loading-check { display: block; }

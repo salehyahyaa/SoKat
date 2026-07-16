@@ -26,6 +26,7 @@ camera photo (12 MP)
   → Homography: DLT solve, image plane ↔ physical plane (inches)
   → user taps closet corners → real-world distances on that plane
   → ClosetModel: paired-edge averaging + consistency diagnostics
+  → ClosetEmptier: contents digitally removed from the photo (before/after swipe)
   → EmptyClosetRenderer: clean 3D interior at measured size, contents gone
 ```
 
@@ -48,6 +49,7 @@ optional **refinement pass** (second photo, averaged) cuts random error by
 │   ├── homography.js           # Homography — DLT solve + perspective mapping (pure math)
 │   ├── measurement.js          # PlaneMeasurement — calibrated plane, pixels → inches
 │   ├── closet-model.js         # ClosetModel — dimensions value object + 1/16″ formatting
+│   ├── emptier.js              # buildEmptiedViews + BeforeAfterView — remove contents from the photo
 │   ├── renderer.js             # EmptyClosetRenderer — 3D empty-closet view (Canvas 2D)
 │   └── accuracy.js             # AccuracyChecker — live error report vs. known length
 ├── tests/                      # run with `npm test` (node --test, no deps)
@@ -76,6 +78,7 @@ Zero-dependency vanilla JS (ES2022), one class per module:
 | `Homography` | `js/homography.js` | DLT solve (Gaussian elimination w/ partial pivoting), perspective mapping |
 | `PlaneMeasurement` | `js/measurement.js` | Calibrated plane: pixel points → distances in inches |
 | `ClosetModel` | `js/closet-model.js` | Dimensions value object; paired-edge averaging; 1/16″ fraction formatting |
+| `BeforeAfterView` | `js/emptier.js` | Inpaints the tapped closet region with a clean, lit wall surface; swipeable with-contents / emptied comparison |
 | `EmptyClosetRenderer` | `js/renderer.js` | Own perspective projection on Canvas 2D; rotatable empty interior + dimension callouts |
 | `AccuracyChecker` | `js/accuracy.js` | Live on-stage error report vs. a known length |
 
