@@ -46,6 +46,7 @@ export class SingleViewMetrology {
 
     this.f = focalPx || this.solveFocal(h1, h2);
     this.focalSource = focalPx ? 'exif' : 'homography';
+    this.Hcols = { h1, h2 }; // plane->image homography columns, for validation
     const pose = this.decompose(h1, h2, h3);
     this.R = pose.R; // [r1, r2, r3] — the columns of the rotation matrix
     this.C = pose.C; // camera center in plane frame (|z| = height above floor)

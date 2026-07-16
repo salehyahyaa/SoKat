@@ -41,6 +41,7 @@ export class PhotoEraser {
     this.ctx = canvas.getContext('2d');
     this.emptied = views.emptied;
     this.pristine = cloneCanvas(views.emptied); // for reset()
+    this.undoStack = []; // snapshots before each edit, newest last
     this.hull = convexHull(hull);
     this.dpr = window.devicePixelRatio || 1;
     this.dragging = false;
@@ -102,8 +103,23 @@ export class PhotoEraser {
   }
 
   reset() {
+    this.undoStack = [];
     this.emptied.getContext('2d').drawImage(this.pristine, 0, 0);
     this.render();
+  }
+
+  // Snapshot before an edit; capped so memory stays bounded on phones.
+  pushUndo() {
+    this.undoStack.push(cloneCanvas(this.emptied));
+    if (this.undoStack.length > 6) this.undoStack.shift();
+  }
+
+  undo() {
+    const prev = this.undoStack.pop();
+    if (!prev) return false;
+    this.emptied.getContext('2d').drawImage(prev, 0, 0);
+    this.render();
+    return true;
   }
 
   brushRadius() {
@@ -113,6 +129,7 @@ export class PhotoEraser {
   // Wipe the whole tapped region (silhouette of the space/object) at once.
   clearAll() {
     if (this.hull.length < 3) return;
+    this.pushUndo();
     const xs = this.hull.map((p) => p.x);
     const ys = this.hull.map((p) => p.y);
     const pad = this.brushRadius();
@@ -139,6 +156,7 @@ export class PhotoEraser {
   }
 
   applyErase(stroke) {
+    this.pushUndo();
     const R = this.brushRadius();
     let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
     for (const p of stroke) {

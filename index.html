@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
-  <title>SpaceScan — measure any space with your iPhone</title>
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <title>SpaceScan — measure a closet with your iPhone</title>
+  <link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
   <main id="app">
@@ -15,93 +15,220 @@
     <section id="screen-welcome" class="screen">
       <div class="hero">
         <h1>Space<span>Scan</span></h1>
-        <p class="tagline">Measure any space with one photo — a closet, pantry, alcove, or room corner. See it emptied, with its dimensions.</p>
+        <p class="tagline">Measure a <b>rectangular closet, pantry, or alcove</b> from one iPhone photo — with honest, validated results.</p>
       </div>
       <ol class="how">
-        <li><b>Take one photo</b> of the space or object.</li>
-        <li><b>Tap its 6 corners</b>.</li>
-        <li><b>Enter one length you know</b> (like the ceiling height) — get its dimensions, a 3D model, and an eraser to remove objects from the photo.</li>
+        <li><b>Take one photo</b> of the whole closet opening — floor, back wall, and ceiling line.</li>
+        <li><b>Tap its 6 corners</b> following the on-screen diagram; the app checks the geometry before it computes anything.</li>
+        <li><b>Enter one measurement you know</b> (like the ceiling height) — that sets the scale for the rest.</li>
       </ol>
-      <div id="height-chips" class="chips">
-        <span class="chips-label">Your height (once — sharpens auto-scale):</span>
-        <button data-in="62">~5′2″</button>
-        <button data-in="67">~5′7″</button>
-        <button data-in="72">~6′0″</button>
-        <button data-in="76">~6′4″</button>
-      </div>
+      <p class="supported">
+        <b>Supported:</b> box-shaped enclosed spaces — closets, pantries, alcoves.<br>
+        <b>Not supported:</b> couches, chairs, irregular furniture, open rooms — the geometry
+        assumes a rectangular floor and a vertical back wall, and scans that don't fit are rejected.
+      </p>
       <div class="stack">
-        <button id="btn-start" class="primary">Scan — 1 photo</button>
+        <button id="btn-start" class="primary">Scan a closet</button>
       </div>
       <p class="footnote">Runs entirely on this phone — no install, no server.</p>
+    </section>
+
+    <!-- Guide: diagram + shooting checklist -->
+    <section id="screen-guide" class="screen">
+      <header class="bar">
+        <h2>The 6 corners you'll tap</h2>
+      </header>
+      <div class="guide-wrap">
+        <canvas id="guide-large" width="512" height="512"></canvas>
+        <ol class="tap-order">
+          <li><b>1</b> back-bottom-left</li>
+          <li><b>2</b> back-bottom-right</li>
+          <li><b>3</b> front-bottom-left</li>
+          <li><b>4</b> front-bottom-right</li>
+          <li><b>5</b> back-top-left</li>
+          <li><b>6</b> back-top-right</li>
+        </ol>
+      </div>
+      <ul class="checklist" id="shoot-checklist">
+        <li>Show the <b>entire opening</b>: floor, rear wall, and ceiling line</li>
+        <li>Stand <b>centered</b>, phone at chest height, avoid severe tilt</li>
+        <li>Prefer the <b>1× lens</b> (avoid 0.5× ultra-wide when possible)</li>
+        <li>Good lighting; every corner you'll tap must be visible</li>
+      </ul>
+      <div class="stack push-down">
+        <button id="btn-guide-continue" class="primary">Got it — take the photo</button>
+        <button id="btn-guide-home" class="secondary">Back</button>
+      </div>
     </section>
 
     <!-- Capture -->
     <section id="screen-capture" class="screen">
       <header class="bar">
-        <h2 id="capture-title"></h2>
+        <h2>One photo — the whole closet</h2>
       </header>
-      <p id="capture-text" class="body-text"></p>
+      <p class="body-text">
+        Photograph the closet so the <b>floor's front edge</b>, the <b>back wall</b>,
+        and the <b>ceiling line</b> are all in frame.<br><br>
+        Stand centered at a natural height. If it doesn't fit, step back rather
+        than switching to the 0.5× lens.
+      </p>
       <div class="stack push-down">
         <button id="btn-open-camera" class="primary">📷 Open Camera</button>
         <button id="btn-capture-home" class="secondary">Back to start</button>
       </div>
     </section>
 
+    <!-- Photo checklist -->
+    <section id="screen-photocheck" class="screen no-pad">
+      <header class="bar">
+        <h2>Check the photo</h2>
+      </header>
+      <canvas id="photocheck-canvas"></canvas>
+      <ul class="checklist auto" id="photocheck-auto"></ul>
+      <ul class="checklist" id="photocheck-list">
+        <li><label><input type="checkbox"> All 4 floor corners are visible</label></li>
+        <li><label><input type="checkbox"> The ceiling line of the back wall is visible</label></li>
+        <li><label><input type="checkbox"> This is a box-shaped closet/alcove, not furniture</label></li>
+      </ul>
+      <div class="bar buttons">
+        <button id="btn-photocheck-retake" class="secondary">Retake</button>
+        <button id="btn-photocheck-continue" class="primary" disabled>Use this photo</button>
+      </div>
+    </section>
+
     <!-- Corner picking -->
     <section id="screen-pick" class="screen no-pad">
       <header class="bar">
-        <h2 id="pick-title"></h2>
+        <h2>Tap the 6 corners</h2>
         <div class="pick-head">
           <canvas id="guide-canvas" width="128" height="128"></canvas>
           <p id="pick-instruction"></p>
         </div>
+        <p id="pick-error" class="pick-error" hidden></p>
       </header>
       <canvas id="pick-canvas"></canvas>
       <footer class="bar buttons">
         <button id="btn-retake" class="secondary">Retake</button>
+        <button id="btn-reset" class="secondary">Reset</button>
         <button id="btn-undo" class="secondary">Undo</button>
         <button id="btn-next" class="primary" disabled>Next</button>
       </footer>
     </section>
 
+    <!-- Reference dimension -->
+    <section id="screen-reference" class="screen">
+      <header class="bar">
+        <h2>Set the scale — one known measurement</h2>
+      </header>
+      <p class="body-text">
+        A photo gives exact <b>proportions</b> but not absolute size. Enter
+        <b>one</b> dimension you know (in inches) and the other two are
+        calculated from the photo's geometry.
+      </p>
+      <div id="ref-dims" class="seg">
+        <button data-dim="height" class="seg-btn">Height</button>
+        <button data-dim="width" class="seg-btn">Width</button>
+        <button data-dim="depth" class="seg-btn">Depth</button>
+      </div>
+      <div id="ref-presets" class="chips"></div>
+      <div class="acc-row ref-row">
+        <span id="ref-range"></span>
+        <input id="ref-value" type="number" inputmode="decimal" min="0" placeholder="inches"> ″
+      </div>
+      <label class="custom-check"><input id="ref-custom" type="checkbox"> custom value (outside the typical range)</label>
+      <p id="ref-msg" class="pick-error"></p>
+      <div class="stack push-down">
+        <button id="btn-ref-done" class="primary" disabled>Calculate dimensions</button>
+        <button id="btn-ref-back" class="secondary">Back to corners</button>
+      </div>
+    </section>
+
+    <!-- Blocked: low confidence or implausible result -->
+    <section id="screen-lowconf" class="screen">
+      <header class="bar">
+        <h2>Can't produce a reliable measurement</h2>
+      </header>
+      <p class="body-text">
+        Rather than show numbers that are probably wrong, the scan was stopped.
+        Here's why:
+      </p>
+      <ul class="checklist warn-list" id="lowconf-reasons"></ul>
+      <div class="stack push-down">
+        <button id="btn-lowconf-retake" class="primary">Try again</button>
+        <button id="btn-lowconf-home" class="secondary">Back to start</button>
+      </div>
+    </section>
+
     <!-- Results -->
     <section id="screen-results" class="screen no-pad">
       <header class="bar">
-        <h2>Your space — measured</h2>
+        <h2>Your closet — measured</h2>
       </header>
+      <div id="conf-badge" class="badge"></div>
+      <p id="conf-reasons" class="hint"></p>
       <div id="dims"></div>
       <div id="view-toggle" class="seg">
-        <button id="btn-view-photo" class="seg-btn active">📷 Photo</button>
-        <button id="btn-view-3d" class="seg-btn">📐 3D model</button>
+        <button id="btn-view-photo" class="seg-btn active">📷 Photo cleanup</button>
+        <button id="btn-view-3d" class="seg-btn">📐 3D box</button>
       </div>
       <div id="view-area">
         <canvas id="compare-canvas"></canvas>
         <canvas id="scene-canvas" hidden></canvas>
       </div>
       <div id="erase-bar">
-        <button id="btn-clear-all" class="seg-btn">🧹 Remove all objects</button>
+        <button id="btn-clear-all" class="seg-btn">🧹 Clear region</button>
+        <button id="btn-erase-undo" class="seg-btn">↶ Undo</button>
         <button id="btn-erase-reset" class="seg-btn">↺ Reset</button>
       </div>
-      <p class="hint" id="view-hint">paint over any object and lift — it disappears</p>
-      <p id="diagnostics"></p>
+      <p class="hint" id="view-hint"></p>
+      <p id="result-warnings" class="hint warn"></p>
+      <pre id="diag-panel" hidden></pre>
       <div class="bar buttons">
         <button id="btn-restart" class="secondary">Scan again</button>
+        <button id="btn-diagnostics" class="secondary">Diagnostics</button>
+        <button id="btn-validate" class="primary">Validation mode</button>
+      </div>
+    </section>
+
+    <!-- Accuracy validation mode -->
+    <section id="screen-validate" class="screen">
+      <header class="bar">
+        <h2>Validation — app vs tape measure</h2>
+      </header>
+      <p class="body-text">
+        Measure the same closet with a tape measure, enter the true values,
+        and the app records its own error.
+      </p>
+      <div class="acc-grid">
+        <div class="acc-row"><span>True width</span><input id="val-w" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
+        <div class="acc-row"><span>True height</span><input id="val-h" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
+        <div class="acc-row"><span>True depth</span><input id="val-d" type="number" inputmode="decimal" min="0" placeholder="—"> ″</div>
+      </div>
+      <button id="btn-validate-add" class="primary slim">Record this trial</button>
+      <div id="val-table" class="val-table"></div>
+      <p id="val-summary" class="hint"></p>
+      <div class="stack push-down">
+        <div class="row-buttons">
+          <button id="btn-export-json" class="secondary">Export JSON</button>
+          <button id="btn-export-csv" class="secondary">Export CSV</button>
+          <button id="btn-validate-clear" class="secondary">Clear trials</button>
+        </div>
+        <button id="btn-validate-back" class="secondary">Back to results</button>
       </div>
     </section>
 
   </main>
 
-  <!-- Loading / step-transition overlay -->
+  <!-- Loading overlay -->
   <div id="loading-overlay">
     <div class="loading-box">
       <div id="loading-spinner" class="spinner"></div>
-      <div id="loading-check" class="loading-check">✓</div>
       <div id="loading-title"></div>
       <div id="loading-sub"></div>
     </div>
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=8"></script>
+  <script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>

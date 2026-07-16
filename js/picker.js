@@ -11,27 +11,17 @@
  * resolution), independent of screen scale — screen zoom never costs accuracy.
  */
 export class CornerPicker {
-  // ghosts: previously placed point sets shown for context (not editable).
-  // segments: pairs of point indices to connect with a measured line;
-  // segmentLabel(i, j, ptI, ptJ) returns the live length text (or null).
-  // The line follows the finger while dragging, so measurements extend and
-  // recalculate live, like pulling a tape measure.
-  // pointColors: optional per-index color override (e.g. calibration points
-  // in one color, measurement points in another, within one session).
-  constructor(canvas, photo, {
-    count, color = '#00e5a0', ghosts = [], onChange = null,
-    segments = [], segmentLabel = null, pointColors = null,
-  }) {
+  // segments: pairs of point indices connected with dashed wireframe lines
+  // (drawn as soon as both endpoints exist, following drags live) so the
+  // user can verify the box geometry while placing points.
+  constructor(canvas, photo, { count, color = '#00e5a0', onChange = null, segments = [] }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.photo = photo;
     this.count = count;
     this.color = color;
-    this.ghosts = ghosts;
     this.onChange = onChange;
     this.segments = segments;
-    this.segmentLabel = segmentLabel;
-    this.pointColors = pointColors;
     this.points = [];
     this.dragIndex = -1;
     this.dpr = window.devicePixelRatio || 1;
@@ -70,6 +60,14 @@ export class CornerPicker {
       this.render();
       if (this.onChange) this.onChange(this);
     }
+  }
+
+  resetPoints() {
+    if (this.points.length === 0) return;
+    this.points = [];
+    this.dragIndex = -1;
+    this.render();
+    if (this.onChange) this.onChange(this);
   }
 
   // Contain-fit transform between photo pixels and canvas pixels.
@@ -157,22 +155,15 @@ export class CornerPicker {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(this.display, this.offsetX, this.offsetY);
-    for (const ghost of this.ghosts) {
-      ghost.points.forEach((pt, i) => this.drawMarker(pt, ghost.color, i + 1, true));
-    }
     this.drawSegments();
-    this.points.forEach((pt, i) => this.drawMarker(pt, this.colorAt(i), i + 1, false));
+    this.points.forEach((pt, i) => this.drawMarker(pt, this.color, i + 1));
     if (this.dragIndex >= 0 && fingerPos) {
-      this.drawLoupe(this.points[this.dragIndex], fingerPos, this.colorAt(this.dragIndex));
+      this.drawLoupe(this.points[this.dragIndex], fingerPos, this.color);
     }
   }
 
-  colorAt(i) {
-    return (this.pointColors && this.pointColors[i]) || this.color;
-  }
-
-  // Measured lines between placed points. While a point is being dragged its
-  // lines follow the finger and the length labels recompute every frame.
+  // Wireframe lines between placed points; they follow the finger live
+  // while a point is dragged, so the box geometry stays verifiable.
   drawSegments() {
     const { ctx, dpr } = this;
     for (const [i, j] of this.segments) {
@@ -189,34 +180,16 @@ export class CornerPicker {
       ctx.moveTo(ca.x, ca.y);
       ctx.lineTo(cb.x, cb.y);
       ctx.stroke();
-      ctx.setLineDash([]);
-
-      let label = null;
-      if (this.segmentLabel) {
-        try { label = this.segmentLabel(i, j, a, b); } catch { label = null; }
-      }
-      if (label) {
-        const mx = (ca.x + cb.x) / 2;
-        const my = (ca.y + cb.y) / 2;
-        ctx.font = `bold ${12 * dpr}px -apple-system, sans-serif`;
-        const tw = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(10,12,16,0.85)';
-        ctx.fillRect(mx - tw / 2 - 5 * dpr, my - 10 * dpr, tw + 10 * dpr, 20 * dpr);
-        ctx.fillStyle = this.color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, mx, my);
-      }
       ctx.restore();
     }
   }
 
-  drawMarker(imgPt, color, label, ghost) {
+
+  drawMarker(imgPt, color, label) {
     const { ctx } = this;
     const c = this.imgToCanvas(imgPt);
     const r = 11 * this.dpr;
     ctx.save();
-    ctx.globalAlpha = ghost ? 0.45 : 1;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 * this.dpr;
     ctx.beginPath();
