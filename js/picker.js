@@ -16,9 +16,11 @@ export class CornerPicker {
   // segmentLabel(i, j, ptI, ptJ) returns the live length text (or null).
   // The line follows the finger while dragging, so measurements extend and
   // recalculate live, like pulling a tape measure.
+  // pointColors: optional per-index color override (e.g. calibration points
+  // in one color, measurement points in another, within one session).
   constructor(canvas, photo, {
     count, color = '#00e5a0', ghosts = [], onChange = null,
-    segments = [], segmentLabel = null,
+    segments = [], segmentLabel = null, pointColors = null,
   }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -29,6 +31,7 @@ export class CornerPicker {
     this.onChange = onChange;
     this.segments = segments;
     this.segmentLabel = segmentLabel;
+    this.pointColors = pointColors;
     this.points = [];
     this.dragIndex = -1;
     this.dpr = window.devicePixelRatio || 1;
@@ -158,10 +161,14 @@ export class CornerPicker {
       ghost.points.forEach((pt, i) => this.drawMarker(pt, ghost.color, i + 1, true));
     }
     this.drawSegments();
-    this.points.forEach((pt, i) => this.drawMarker(pt, this.color, i + 1, false));
+    this.points.forEach((pt, i) => this.drawMarker(pt, this.colorAt(i), i + 1, false));
     if (this.dragIndex >= 0 && fingerPos) {
-      this.drawLoupe(this.points[this.dragIndex], fingerPos);
+      this.drawLoupe(this.points[this.dragIndex], fingerPos, this.colorAt(this.dragIndex));
     }
+  }
+
+  colorAt(i) {
+    return (this.pointColors && this.pointColors[i]) || this.color;
   }
 
   // Measured lines between placed points. While a point is being dragged its
@@ -227,7 +234,7 @@ export class CornerPicker {
     ctx.restore();
   }
 
-  drawLoupe(imgPt, fingerPos) {
+  drawLoupe(imgPt, fingerPos, color = this.color) {
     const { ctx, canvas } = this;
     const R = 72 * this.dpr;                       // loupe radius
     // Canvas px per photo px inside the loupe; the floor of 4 keeps real
@@ -264,7 +271,7 @@ export class CornerPicker {
       );
     }
     // Crosshair marking the exact point.
-    ctx.strokeStyle = this.color;
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1.5 * this.dpr;
     ctx.beginPath();
     ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);

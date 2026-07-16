@@ -1,25 +1,21 @@
 /**
- * ClosetScanApp — orchestrator. Owns the screen state machine and wires the
+ * SpaceScanApp — orchestrator. Owns the screen state machine and wires the
  * capture → calibrate → measure → render pipeline together.
  *
- * Scan flow:
- *   1. Back-wall photo  → tap 4 paper corners (calibration) → tap 4 closet
- *      corners → width & height, each measured twice for consistency.
- *   2. Floor photo      → tap 4 paper corners → tap back edge & front edge
- *      → depth.
- *   3. Results          → dimensions to 1/16" + rotatable 3D empty closet.
- *
- * Accuracy Check flow: calibrate on sheet A, measure a second known distance,
- * display the live error vs. the 1/16" target.
+ * The whole scan is ONE photo and ONE tapping session:
+ *   drop a letter-size sheet flat on the floor of the space → photograph the
+ *   whole space → tap 10 points (4 paper corners, then 6 space corners).
+ *   Width & depth come straight off the paper-calibrated floor plane; height is recovered
+ *   from the camera pose (single-view metrology, EXIF focal when available).
+ *   Results: dimensions, a before/after "contents removed" photo, and a
+ *   rotatable 3D model of the empty space.
  */
 import { CameraCapture } from './camera.js';
 import { CornerPicker } from './picker.js';
-import { PlaneMeasurement } from './measurement.js';
 import { SingleViewMetrology } from './metrology.js';
 import { ClosetModel } from './closet-model.js';
 import { EmptyClosetRenderer } from './renderer.js';
 import { buildEmptiedViews, BeforeAfterView } from './emptier.js';
-import { AccuracyChecker, TARGET_IN } from './accuracy.js';
 
 const RETAKE = Symbol('retake');
 const HOME = Symbol('home');
@@ -27,44 +23,25 @@ const HOME = Symbol('home');
 const PAPER_COLOR = '#4da3ff';
 const TARGET_COLOR = '#00e5a0';
 
-const LABELS = {
-  paperWall: [
-    'paper TOP-LEFT corner',
-    'paper TOP-RIGHT corner',
-    'paper BOTTOM-RIGHT corner',
-    'paper BOTTOM-LEFT corner',
-  ],
-  closet: [
-    'closet back wall TOP-LEFT corner',
-    'closet back wall TOP-RIGHT corner',
-    'closet back wall BOTTOM-RIGHT corner',
-    'closet back wall BOTTOM-LEFT corner',
-  ],
-  closet6: [
-    'closet floor BACK-LEFT corner (floor meets back wall)',
-    'closet floor BACK-RIGHT corner',
-    'closet floor FRONT-LEFT corner (front edge)',
-    'closet floor FRONT-RIGHT corner',
-    'TOP-LEFT of the back wall (at the ceiling)',
-    'TOP-RIGHT of the back wall (at the ceiling)',
-  ],
-  paperFloor: [
-    'paper corner — start of a LONG (11″) edge',
-    'paper corner — other end of that LONG edge',
-    'paper corner — continue around the sheet',
-    'paper corner — last one',
-  ],
-  depth: [
-    'floor where it meets the BACK wall',
-    'FRONT edge of the closet floor (straight out from point 1)',
-  ],
-  accuracy: [
-    'known distance — FIRST end',
-    'known distance — SECOND end',
-  ],
-};
+// One session: paper first (blue), then the space's corners (green).
+const LABELS = [
+  'paper corner — start of a LONG (11″) edge',
+  'paper corner — other end of that LONG edge',
+  'paper corner — continue around the sheet',
+  'paper corner — last one',
+  'floor BACK-LEFT corner (floor meets back wall)',
+  'floor BACK-RIGHT corner',
+  'floor FRONT-LEFT corner (front edge)',
+  'floor FRONT-RIGHT corner',
+  'TOP-LEFT of the back wall (at the ceiling)',
+  'TOP-RIGHT of the back wall (at the ceiling)',
+];
+const POINT_COLORS = [
+  PAPER_COLOR, PAPER_COLOR, PAPER_COLOR, PAPER_COLOR,
+  TARGET_COLOR, TARGET_COLOR, TARGET_COLOR, TARGET_COLOR, TARGET_COLOR, TARGET_COLOR,
+];
 
-export class ClosetScanApp {
+export class SpaceScanApp {
   constructor(doc = document) {
     this.doc = doc;
     this.$ = (id) => doc.getElementById(id);
@@ -75,13 +52,12 @@ export class ClosetScanApp {
 
     this.$('btn-view-photo').addEventListener('click', () => this.setResultsView('photo'));
     this.$('btn-view-3d').addEventListener('click', () => this.setResultsView('3d'));
-    this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runQuickScan()));
-    this.$('btn-precision').addEventListener('click', () => this.runGuarded(() => this.runPrecisionScan()));
-    this.$('btn-accuracy').addEventListener('click', () => this.runGuarded(() => this.runAccuracyCheck()));
+    this.$('btn-erase').addEventListener('click', () => this.toggleErase());
+    this.$('btn-erase-reset').addEventListener('click', () => {
+      if (this.compareView) this.compareView.reset();
+    });
+    this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
-    this.$('btn-acc-home').addEventListener('click', () => this.showScreen('welcome'));
-    this.$('btn-acc-again').addEventListener('click', () => this.runGuarded(() => this.runAccuracyCheck()));
-    this.$('acc-true').addEventListener('input', () => this.updateAccuracyReport());
 
     this.showScreen('welcome');
   }
@@ -118,14 +94,6 @@ export class ClosetScanApp {
     this.$('loading-sub').textContent = sub;
     overlay.classList.toggle('done', done);
     overlay.classList.toggle('active', on);
-  }
-
-  // Confirmation beat between steps: a ✓ with "what's next", so a Next tap
-  // always produces visible feedback before the screen changes under it.
-  async flashStep(title, sub, ms = 1100) {
-    this.setOverlay(true, { title, sub, done: true });
-    await new Promise((r) => setTimeout(r, ms));
-    this.setOverlay(false);
   }
 
   // Spinner shown while `work` runs; stays up ≥ minMs so it reads as a real
@@ -173,8 +141,8 @@ export class ClosetScanApp {
 
   // ------------------------------------------------------------------ pick
 
-  // One corner-picking session on a photo; resolves the points, or RETAKE.
-  pickPoints(photo, { title, labels, color, ghosts = [], doneText, segments = [], segmentLabel = null }) {
+  // The single tapping session on the photo; resolves the points, or RETAKE.
+  pickPoints(photo, { title, labels, ghosts = [], doneText, segments = [], segmentLabel = null, pointColors = null }) {
     this.showScreen('pick');
     this.$('pick-title').textContent = title;
     const canvas = this.$('pick-canvas');
@@ -197,10 +165,11 @@ export class ClosetScanApp {
       };
       const picker = new CornerPicker(canvas, photo, {
         count: labels.length,
-        color,
+        color: TARGET_COLOR,
         ghosts,
         segments,
         segmentLabel,
+        pointColors,
         onChange: update,
       });
       this.picker = picker;
@@ -223,89 +192,54 @@ export class ClosetScanApp {
 
   // ------------------------------------------------------------------ scan
 
-  // Quick Scan: ONE photo, paper simply dropped flat on the closet floor.
-  // Width & depth are measured on the calibrated floor plane; height is
-  // recovered from the camera pose (EXIF focal when available). Convenience
-  // mode — typical accuracy ±1/2″, height ±1½″.
-  async runQuickScan() {
-    const scan = await this.stepQuickScan();
+  async runScan() {
+    const scan = await this.stepScan();
     await this.withLoading(
-      'Emptying your closet…',
+      'Emptying the space…',
       'Removing contents and calculating dimensions',
       async () => this.showResults(scan),
       1400,
     );
   }
 
-  async stepQuickScan() {
+  async stepScan() {
     while (true) {
       const photo = await this.capturePhoto(
-        'One photo — the whole closet',
-        'Drop the letter-size sheet <b>flat on the closet floor</b> — no tape '
-        + 'needed.<br><br>Step back so ONE photo shows the <b>whole closet</b>: '
-        + 'the floor from its front edge to the back wall, and the back wall '
-        + 'up to the ceiling. Shoot from a natural standing height.',
+        'One photo — the whole space',
+        'Drop the letter-size sheet <b>flat on the floor</b> of the space — '
+        + 'no tape needed.<br><br>Step back so ONE photo shows the '
+        + '<b>whole space</b>: the floor from its front edge to the back '
+        + 'wall, and the back wall up to the ceiling. Use the 0.5× lens if '
+        + 'it doesn\'t all fit.',
       );
-      const paper = await this.pickPoints(photo, {
-        title: 'Calibrate — paper corners',
-        labels: LABELS.paperFloor,
-        color: PAPER_COLOR,
-      });
-      if (paper === RETAKE) continue;
-
-      let metro;
-      try {
-        metro = new SingleViewMetrology(paper, photo.width, photo.height, {
-          focalPx: photo.focalPx || null,
-        });
-      } catch (err) {
-        alert(`${err.message || err}`);
-        continue;
-      }
-      await this.flashStep(
-        'Floor calibrated',
-        'Same photo — tap the 6 closet corners. Lines measure LIVE as you drag.',
-      );
-
-      // Measured live segments: back width, front width, both depths, both
-      // heights — the tape-measure lines that follow the finger.
-      const SEGMENTS = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 4], [1, 5]];
-      const SEG_PREFIX = { '0,1': 'W', '2,3': 'W', '0,2': 'D', '1,3': 'D', '0,4': 'H', '1,5': 'H' };
       const pts = await this.pickPoints(photo, {
-        title: 'Measure — closet corners',
-        labels: LABELS.closet6,
-        color: TARGET_COLOR,
-        ghosts: [{ points: paper, color: PAPER_COLOR }],
-        segments: SEGMENTS,
-        segmentLabel: (i, j, a, b) => {
-          const prefix = SEG_PREFIX[`${i},${j}`];
-          if (prefix === 'H') {
-            const base = this.picker?.points;
-            if (!base || !base[0] || !base[1]) return null;
-            return `H ${ClosetModel.toFraction16(metro.wallHeight(base[0], base[1], b))}`;
-          }
-          return `${prefix} ${ClosetModel.toFraction16(metro.distance(a, b))}`;
-        },
+        title: 'Tap the 10 points',
+        labels: LABELS,
+        pointColors: POINT_COLORS,
       });
       if (pts === RETAKE) continue;
 
       try {
-        const backQuad = [pts[4], pts[5], pts[1], pts[0]]; // TL TR BR BL
+        const metro = new SingleViewMetrology(pts.slice(0, 4), photo.width, photo.height, {
+          focalPx: photo.focalPx || null,
+        });
+        const [, , , , bl, br, fl, fr, tl, tr] = pts;
+        const backQuad = [tl, tr, br, bl]; // TL TR BR BL of the back wall
         return {
           model: new ClosetModel({
-            widthTop: metro.distance(pts[0], pts[1]),
-            widthBottom: metro.distance(pts[2], pts[3]),
-            heightLeft: metro.wallHeight(pts[0], pts[1], pts[4]),
-            heightRight: metro.wallHeight(pts[0], pts[1], pts[5]),
-            depthLeft: metro.distance(pts[0], pts[2]),
-            depthRight: metro.distance(pts[1], pts[3]),
+            widthTop: metro.distance(bl, br),
+            widthBottom: metro.distance(fl, fr),
+            heightLeft: metro.wallHeight(bl, br, tl),
+            heightRight: metro.wallHeight(bl, br, tr),
+            depthLeft: metro.distance(bl, fl),
+            depthRight: metro.distance(br, fr),
           }),
           photo,
-          closetQuad: backQuad,
+          backQuad,
           wallColor: sampleWallColor(photo, backQuad),
           note: metro.focalSource === 'exif'
-            ? 'Quick Scan (1 photo) · typical ±1/2″, height ±1½″ — use Precision Scan for 1/16″'
-            : 'Quick Scan (1 photo, no camera EXIF — height is approximate) — use Precision Scan for 1/16″',
+            ? 'One-photo scan · typical accuracy ±1/2″ (height ±1½″)'
+            : 'One-photo scan (no camera EXIF — height is approximate)',
         };
       } catch (err) {
         alert(`${err.message || err}`);
@@ -313,135 +247,9 @@ export class ClosetScanApp {
     }
   }
 
-  // Precision Scan: the original two-photo flow — paper taped to the back
-  // wall, then on the floor. Everything is measured ON a calibrated plane,
-  // which is what reaches the 1/16″ target (see tests/noise.test.js).
-  async runPrecisionScan() {
-    let wall = await this.stepBackWall();
-    let passes = 1;
-    if (await this.offerRefinement()) {
-      // Second independent photo + taps; averaging two independent
-      // measurements cuts noise by ~sqrt(2) — this is what carries a large
-      // width across the 1/16" target (see tests/noise.test.js).
-      const second = await this.stepBackWall();
-      wall = {
-        widthTop: (wall.widthTop + second.widthTop) / 2,
-        widthBottom: (wall.widthBottom + second.widthBottom) / 2,
-        heightLeft: (wall.heightLeft + second.heightLeft) / 2,
-        heightRight: (wall.heightRight + second.heightRight) / 2,
-        wallColor: wall.wallColor,
-        photo: wall.photo,
-        closetQuad: wall.closetQuad,
-      };
-      passes = 2;
-    }
-    const depth = await this.stepFloor();
-    await this.withLoading(
-      'Emptying your closet…',
-      'Removing contents and calculating dimensions to 1/16″',
-      async () => this.showResults({
-        model: new ClosetModel({ ...wall, depth }),
-        photo: wall.photo,
-        closetQuad: wall.closetQuad,
-        wallColor: wall.wallColor,
-        note: `Precision Scan (2 photos) · targets 1/16″${passes > 1 ? ` · ${passes} passes averaged` : ''}`,
-      }),
-      1400,
-    );
-  }
+  // --------------------------------------------------------------- results
 
-  // Ask whether to take a second back-wall photo for maximum accuracy.
-  offerRefinement() {
-    this.showScreen('refine');
-    const btnYes = this.$('btn-refine-yes');
-    const btnSkip = this.$('btn-refine-skip');
-    return new Promise((resolve) => {
-      const onYes = () => { cleanup(); resolve(true); };
-      const onSkip = () => { cleanup(); resolve(false); };
-      const cleanup = () => {
-        btnYes.removeEventListener('click', onYes);
-        btnSkip.removeEventListener('click', onSkip);
-      };
-      btnYes.addEventListener('click', onYes);
-      btnSkip.addEventListener('click', onSkip);
-    });
-  }
-
-  // Back-wall photo → paper calibration + closet corners → W & H.
-  async stepBackWall() {
-    while (true) {
-      const photo = await this.capturePhoto(
-        'Step 1 of 2 — Back wall',
-        'Tape the letter-size sheet <b>flat</b> on the closet\'s back wall, '
-        + '<b>landscape</b> (long edge horizontal), around chest height.<br><br>'
-        + 'Stand back so the <b>whole back wall</b> is in frame, hold the phone '
-        + 'as square to the wall as you can, and take the photo.',
-      );
-      const paper = await this.pickPoints(photo, {
-        title: 'Calibrate — paper corners',
-        labels: LABELS.paperWall,
-        color: PAPER_COLOR,
-      });
-      if (paper === RETAKE) continue;
-      await this.flashStep(
-        'Paper calibrated',
-        'Same photo — now tap the 4 corners of the closet back wall',
-      );
-      const closet = await this.pickPoints(photo, {
-        title: 'Measure — closet corners',
-        labels: LABELS.closet,
-        color: TARGET_COLOR,
-        ghosts: [{ points: paper, color: PAPER_COLOR }],
-      });
-      if (closet === RETAKE) continue;
-      await this.flashStep('Width & height captured', 'Next: measure the depth');
-
-      const plane = new PlaneMeasurement(paper);
-      return {
-        widthTop: plane.distance(closet[0], closet[1]),
-        widthBottom: plane.distance(closet[3], closet[2]),
-        heightLeft: plane.distance(closet[0], closet[3]),
-        heightRight: plane.distance(closet[1], closet[2]),
-        wallColor: sampleWallColor(photo, paper),
-        photo,
-        closetQuad: closet,
-      };
-    }
-  }
-
-  // Floor photo → paper calibration + 2 depth points → D.
-  async stepFloor() {
-    while (true) {
-      const photo = await this.capturePhoto(
-        'Step 2 of 2 — Floor (depth)',
-        'Move the sheet to the <b>closet floor</b>, lying flat.<br><br>'
-        + 'Photograph the floor so you can see both the <b>back wall base</b> '
-        + 'and the <b>front edge</b> of the closet.',
-      );
-      const paper = await this.pickPoints(photo, {
-        title: 'Calibrate — paper corners',
-        labels: LABELS.paperFloor,
-        color: PAPER_COLOR,
-      });
-      if (paper === RETAKE) continue;
-      await this.flashStep(
-        'Paper calibrated',
-        'Same photo — now mark the closet depth with 2 points',
-      );
-      const pts = await this.pickPoints(photo, {
-        title: 'Measure — depth',
-        labels: LABELS.depth,
-        color: TARGET_COLOR,
-        ghosts: [{ points: paper, color: PAPER_COLOR }],
-      });
-      if (pts === RETAKE) continue;
-
-      const plane = new PlaneMeasurement(paper);
-      return plane.distance(pts[0], pts[1]);
-    }
-  }
-
-  showResults({ model, photo, closetQuad, wallColor, note }) {
+  showResults({ model, photo, backQuad, wallColor, note }) {
     this.showScreen('results');
     this.$('dims').innerHTML = [
       dimCard('Width', model.widthText),
@@ -459,11 +267,23 @@ export class ClosetScanApp {
     if (this.compareView) { this.compareView.destroy(); this.compareView = null; }
     this.resultsModel = model;
     this.resultsWallColor = wallColor;
-    if (photo && closetQuad) {
-      const views = buildEmptiedViews(photo, closetQuad, wallColor);
+    if (photo && backQuad) {
+      const views = buildEmptiedViews(photo, backQuad, wallColor);
       this.compareView = new BeforeAfterView(this.$('compare-canvas'), views);
     }
+    this.$('btn-erase').classList.remove('active');
     this.setResultsView(this.compareView ? 'photo' : '3d');
+  }
+
+  // Erase mode: drag over any other object in the emptied photo to wipe it.
+  toggleErase() {
+    if (!this.compareView) return;
+    const on = !this.compareView.eraseMode;
+    this.compareView.setEraseMode(on);
+    this.$('btn-erase').classList.toggle('active', on);
+    this.$('view-hint').textContent = on
+      ? 'drag over any object to wipe it away — tap Erase again when done'
+      : 'slide the handle — left: as photographed, right: contents removed';
   }
 
   // Toggle between the emptied-photo comparison and the 3D model. Views are
@@ -474,12 +294,13 @@ export class ClosetScanApp {
     this.$('btn-view-3d').classList.toggle('active', !photoMode);
     this.$('compare-canvas').hidden = !photoMode;
     this.$('scene-canvas').hidden = !!photoMode;
+    this.$('erase-bar').hidden = !photoMode;
     if (photoMode) {
       this.$('view-hint').textContent = 'slide the handle — left: as photographed, right: contents removed';
       this.compareView.layout();
       this.compareView.render();
     } else {
-      this.$('view-hint').textContent = 'drag to look around the empty closet';
+      this.$('view-hint').textContent = 'drag to look around the empty space';
       if (!this.renderer && this.resultsModel) {
         this.renderer = new EmptyClosetRenderer(this.$('scene-canvas'), this.resultsModel, {
           wallColor: this.resultsWallColor,
@@ -490,84 +311,21 @@ export class ClosetScanApp {
       }
     }
   }
-
-  // ------------------------------------------------------- accuracy check
-
-  async runAccuracyCheck() {
-    while (true) {
-      const photo = await this.capturePhoto(
-        'Accuracy Check',
-        'Tape <b>two</b> letter-size sheets on the same wall, a few feet apart '
-        + '(or one sheet plus any distance you\'ve measured with a tape).<br><br>'
-        + 'The app will calibrate on sheet A, measure the known distance, and '
-        + 'show its own error live.',
-      );
-      const paper = await this.pickPoints(photo, {
-        title: 'Calibrate — sheet A corners',
-        labels: LABELS.paperWall,
-        color: PAPER_COLOR,
-      });
-      if (paper === RETAKE) continue;
-      await this.flashStep(
-        'Sheet A calibrated',
-        'Same photo — now tap the two ends of the known distance',
-      );
-      const livePlane = new PlaneMeasurement(paper);
-      const pts = await this.pickPoints(photo, {
-        title: 'Measure a known distance',
-        labels: LABELS.accuracy,
-        color: TARGET_COLOR,
-        ghosts: [{ points: paper, color: PAPER_COLOR }],
-        doneText: 'tip: sheet B\'s long edge is exactly 11.000″ — tap Next',
-        segments: [[0, 1]],
-        segmentLabel: (i, j, a, b) => `${livePlane.distance(a, b).toFixed(3)}″`,
-      });
-      if (pts === RETAKE) continue;
-
-      const checker = new AccuracyChecker(paper);
-      this.lastMeasured = await this.withLoading(
-        'Measuring…', 'Comparing against the calibrated plane',
-        async () => checker.measure(pts[0], pts[1]),
-      );
-      this.showScreen('accuracy');
-      this.$('acc-measured').textContent = `${this.lastMeasured.toFixed(3)}″`;
-      this.updateAccuracyReport();
-      return;
-    }
-  }
-
-  updateAccuracyReport() {
-    if (this.lastMeasured == null) return;
-    const trueIn = parseFloat(this.$('acc-true').value);
-    const badge = this.$('acc-badge');
-    if (!Number.isFinite(trueIn) || trueIn <= 0) {
-      this.$('acc-error').textContent = '—';
-      badge.textContent = 'enter true length';
-      badge.className = 'badge';
-      return;
-    }
-    const r = AccuracyChecker.report(this.lastMeasured, trueIn);
-    const sign = r.errorIn >= 0 ? '+' : '−';
-    this.$('acc-error').textContent =
-      `${sign}${Math.abs(r.errorIn).toFixed(3)}″  (${sign}${Math.abs(r.errorSixteenths).toFixed(1)}/16)`;
-    badge.textContent = r.pass ? `PASS — within 1/16″ (${TARGET_IN.toFixed(4)}″)` : 'outside 1/16″ target';
-    badge.className = r.pass ? 'badge pass' : 'badge fail';
-  }
 }
 
 function dimCard(label, value) {
   return `<div class="dim-card"><div class="dim-label">${label}</div><div class="dim-value">${value}</div></div>`;
 }
 
-// Sample the wall color just outside the paper's corners so the rendered
-// empty closet is tinted like the real one.
-function sampleWallColor(photo, paperPts) {
+// Sample a plausible wall tint just outside the back-wall quad's corners so
+// the rendered empty space is tinted like the real one.
+function sampleWallColor(photo, quadPts) {
   try {
     const ctx = photo.getContext('2d');
-    const cx = paperPts.reduce((a, p) => a + p.x, 0) / 4;
-    const cy = paperPts.reduce((a, p) => a + p.y, 0) / 4;
+    const cx = quadPts.reduce((a, p) => a + p.x, 0) / 4;
+    const cy = quadPts.reduce((a, p) => a + p.y, 0) / 4;
     let r = 0; let g = 0; let b = 0; let n = 0;
-    for (const p of paperPts) {
+    for (const p of quadPts) {
       const sx = Math.round(p.x + (p.x - cx) * 0.45);
       const sy = Math.round(p.y + (p.y - cy) * 0.45);
       if (sx < 2 || sy < 2 || sx > photo.width - 3 || sy > photo.height - 3) continue;
@@ -584,5 +342,5 @@ function sampleWallColor(photo, paperPts) {
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && document.getElementById('screen-welcome')) {
-  window.app = new ClosetScanApp();
+  window.app = new SpaceScanApp();
 }

@@ -124,8 +124,13 @@ export function shade([r, g, b], light) {
 
 /**
  * BeforeAfterView — swipeable comparison of the original photo and the
- * emptied one. Drag anywhere: left of the divider shows the closet as
+ * emptied one. Drag anywhere: left of the divider shows the space as
  * photographed, right of it shows the contents digitally removed.
+ *
+ * Erase mode: dragging becomes a brush that wipes any other object out of
+ * the emptied photo — each stamp is inpainted with the color sampled from a
+ * ring around it, so the fill blends with its surroundings. reset() restores
+ * the freshly-emptied state.
  */
 export class BeforeAfterView {
   constructor(canvas, { original, emptied }) {
@@ -133,9 +138,11 @@ export class BeforeAfterView {
     this.ctx = canvas.getContext('2d');
     this.original = original;
     this.emptied = emptied;
+    this.pristine = cloneCanvas(emptied); // for reset()
     this.pos = 0.5; // divider, fraction of image width
     this.dpr = window.devicePixelRatio || 1;
     this.dragging = false;
+    this.eraseMode = false;
 
     this._onDown = (e) => { this.dragging = true; this.canvas.setPointerCapture(e.pointerId); this.moveTo(e); };
     this._onMove = (e) => { if (this.dragging) this.moveTo(e); };
@@ -177,8 +184,59 @@ export class BeforeAfterView {
   moveTo(e) {
     const rect = this.canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * this.dpr;
-    this.pos = Math.min(1, Math.max(0, (x - this.drawX) / this.drawW));
+    if (this.eraseMode) {
+      const y = (e.clientY - rect.top) * this.dpr;
+      this.eraseAt(
+        ((x - this.drawX) / this.drawW) * this.emptied.width,
+        ((y - this.drawY) / this.drawH) * this.emptied.height,
+      );
+    } else {
+      this.pos = Math.min(1, Math.max(0, (x - this.drawX) / this.drawW));
+    }
     this.render();
+  }
+
+  // ------------------------------------------------------------- erase mode
+
+  setEraseMode(on) {
+    this.eraseMode = on;
+    if (on) this.pos = 0; // show the emptied image full-width while erasing
+    this.render();
+  }
+
+  reset() {
+    this.emptied.getContext('2d').drawImage(this.pristine, 0, 0);
+    this.render();
+  }
+
+  // Wipe a soft brush stamp at image coords: fill with the average color of
+  // a sampling ring around the stamp so it blends with the surroundings.
+  eraseAt(ix, iy) {
+    const img = this.emptied;
+    if (ix < 0 || iy < 0 || ix >= img.width || iy >= img.height) return;
+    const ctx = img.getContext('2d');
+    const R = Math.max(10, Math.max(img.width, img.height) * 0.028);
+
+    let r = 0; let g = 0; let b = 0; let n = 0;
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      const sx = Math.round(ix + Math.cos(a) * R * 1.8);
+      const sy = Math.round(iy + Math.sin(a) * R * 1.8);
+      if (sx < 0 || sy < 0 || sx >= img.width || sy >= img.height) continue;
+      const d = ctx.getImageData(sx, sy, 1, 1).data;
+      r += d[0]; g += d[1]; b += d[2]; n++;
+    }
+    if (n === 0) return;
+    r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
+
+    const grad = ctx.createRadialGradient(ix, iy, 0, ix, iy, R);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.95)`);
+    grad.addColorStop(0.7, `rgba(${r},${g},${b},0.8)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(ix, iy, R, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   render() {
@@ -195,9 +253,13 @@ export class BeforeAfterView {
     ctx.drawImage(this.emptied, this.drawX, this.drawY, this.drawW, this.drawH);
     ctx.restore();
 
-    this.drawDivider(split);
-    this.drawTag('WITH CONTENTS', this.drawX + 8 * this.dpr, false);
-    this.drawTag('EMPTIED', this.drawX + this.drawW - 8 * this.dpr, true);
+    if (this.eraseMode) {
+      this.drawTag('ERASE — drag over an object to wipe it', this.drawX + 8 * this.dpr, false);
+    } else {
+      this.drawDivider(split);
+      this.drawTag('WITH CONTENTS', this.drawX + 8 * this.dpr, false);
+      this.drawTag('EMPTIED', this.drawX + this.drawW - 8 * this.dpr, true);
+    }
   }
 
   drawDivider(x) {
@@ -239,4 +301,11 @@ export class BeforeAfterView {
     ctx.fillText(text, bx + pad, by + 10 * dpr);
     ctx.restore();
   }
+}
+
+function cloneCanvas(src) {
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  c.getContext('2d').drawImage(src, 0, 0);
+  return c;
 }

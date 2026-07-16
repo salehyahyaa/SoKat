@@ -1,9 +1,9 @@
-# ClosetScan
+# SpaceScan
 
-Scan a closet with an iPhone — in the browser, no app install. The phone's
-camera photographs the space, the app digitally empties it into a clean,
-rotatable 3D model, and displays the closet's dimensions to the nearest
-**1/16″**, with a built-in live accuracy check.
+Measure any space with an iPhone — a closet, pantry, alcove, or room corner —
+in the browser, no app install. ONE photo, ten taps: the app digitally
+empties the space (with a brush to erase any other object), shows a clean
+rotatable 3D model, and displays the dimensions. Zero dependencies.
 
 **Demo:** open the GitHub Pages URL on an iPhone in Safari. Everything runs
 on-device; there is no backend.
@@ -80,7 +80,7 @@ target (proven in `tests/noise.test.js`).
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # CI/CD: test + static gates → deploy to GitHub Pages
-└── package.json                # scripts only (test / check / serve) — no dependencies
+└── package.json                # scripts only (test / check / serve / build) — no dependencies
 ```
 
 ## Architecture
@@ -146,6 +146,7 @@ One-time setup: repo **Settings → Pages → Source: GitHub Actions**.
 npm test          # accuracy + unit suites (18 tests, no dependencies)
 npm run check     # syntax gate
 npm run serve     # local server at http://localhost:8000
+npm run build     # minified production build in dist/ (esbuild via npx, still no deps)
 ```
 
 To try on an iPhone during development: `npm run serve`, then open

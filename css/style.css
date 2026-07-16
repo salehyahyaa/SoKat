@@ -202,3 +202,12 @@ button:active:not(:disabled) { transform: scale(0.98); }
 
 #loading-overlay.done .spinner { display: none; }
 #loading-overlay.done .loading-check { display: block; }
+
+/* ---------- results: erase bar ---------- */
+#erase-bar {
+  display: flex; gap: 6px;
+  margin: 8px 16px 0;
+}
+#erase-bar[hidden] { display: none; }
+#erase-bar .seg-btn { background: var(--panel); }
+#erase-bar .seg-btn.active { background: rgba(0, 229, 160, 0.18); color: var(--accent); }
