@@ -33,10 +33,10 @@ const TARGET_COLOR = '#00e5a0';
 const PAPER_COLOR = '#4da3ff';
 
 const PAPER_LABELS = [
-  'sheet corner — start of a LONG (11″) edge',
-  'sheet corner — other end of that long edge',
-  'sheet corner — continue around',
-  'sheet corner — last one',
+  'first sheet corner (any one)',
+  'next corner, going around the sheet',
+  'third corner, same direction',
+  'last corner',
 ];
 const ENDPOINT_LABELS = {
   width: ['LEFT corner of the back wall', 'RIGHT corner of the back wall'],
@@ -310,6 +310,7 @@ export class SpaceScanApp {
       const imgW = photo.width; const imgH = photo.height;
 
       let poseResult = null;
+      let chosenDims = [11, 8.5];
       const paper = await this.pickStage(photo, {
         title: `Calibrate — sheet corners (${view})`,
         labels: PAPER_LABELS,
@@ -318,23 +319,31 @@ export class SpaceScanApp {
         validate: (pts) => {
           const quad = validatePaperQuad(pts, imgW, imgH);
           if (!quad.ok) return quad;
-          let plane;
-          try {
-            plane = new PlaneMeasurement(pts);
-          } catch (err) {
-            return { ok: false, errors: [{ code: 'degenerate', message: err.message }] };
+          // The user may go around the sheet starting on either edge — try
+          // both world mappings and keep the one that matches a real
+          // 8.5×11 rectangle (edge-norm ratio closest to 1).
+          let best = null;
+          for (const dims2 of [[11, 8.5], [8.5, 11]]) {
+            let plane2;
+            try {
+              plane2 = new PlaneMeasurement(pts, dims2[0], dims2[1]);
+            } catch { continue; }
+            const pose = paperPoseChecks(pts, imgW, imgH, {
+              exifFocal: photo.focalPx || null,
+              homographyColumns: plane2.Hcols,
+            });
+            const ratioErr = Math.abs(Math.log(pose.metrics.normRatio ?? 1));
+            if (!best || ratioErr < best.ratioErr) best = { pose, ratioErr, dims: dims2 };
           }
-          const pose = paperPoseChecks(pts, imgW, imgH, {
-            exifFocal: photo.focalPx || null,
-            homographyColumns: plane.Hcols,
-          });
-          poseResult = { ...pose, metrics: { ...pose.metrics, areaFrac: quad.metrics.areaFrac } };
-          return pose.ok ? { ok: true } : pose;
+          if (!best) return { ok: false, errors: [{ code: 'degenerate', message: 'These corner taps don\'t form a usable sheet — re-place them.' }] };
+          chosenDims = best.dims;
+          poseResult = { ...best.pose, metrics: { ...best.pose.metrics, areaFrac: quad.metrics.areaFrac } };
+          return best.pose.ok ? { ok: true } : best.pose;
         },
       });
       if (paper === RETAKE) continue;
 
-      const plane = new PlaneMeasurement(paper);
+      const plane = new PlaneMeasurement(paper, chosenDims[0], chosenDims[1]);
       const out = { view, photo, paper, pose: poseResult, measures: {}, checks: {} };
       let retakeView = false;
       for (const dim of dims) {

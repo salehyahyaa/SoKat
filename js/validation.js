@@ -99,7 +99,7 @@ export function validatePaperQuad(pts, imgW, imgH) {
     }
   }
   if (!isConvexQuad(pts)) {
-    errors.push({ code: 'crossed', message: 'The sheet corners cross over — tap them going AROUND the sheet, starting along a long (11″) edge.' });
+    errors.push({ code: 'crossed', message: 'The sheet corners cross over — tap them going around the sheet, one corner after the next.' });
   }
   const areaFrac = quadArea(pts) / (imgW * imgH);
   if (errors.length === 0 && areaFrac < THRESHOLDS.minPaperAreaFrac) {
@@ -193,10 +193,8 @@ export function paperPoseChecks(paperPts, imgW, imgH, { exifFocal = null, homogr
         } else if (metrics.orthoResidual > THRESHOLDS.orthoWarn) {
           warnings.push({ code: 'not-rectangle', message: 'Sheet corners are only approximately rectangular' });
         }
-        if (metrics.normRatio < THRESHOLDS.normRatioSwapLo || metrics.normRatio > 1 / THRESHOLDS.normRatioSwapLo) {
-          errors.push({ code: 'edge-order', message: 'It looks like you started along a SHORT (8.5″) edge — start the corner taps along a LONG (11″) edge.' });
-        } else if (metrics.normRatio < THRESHOLDS.normRatioWarn || metrics.normRatio > 1 / THRESHOLDS.normRatioWarn) {
-          warnings.push({ code: 'edge-order', message: 'Sheet proportions look slightly off — double-check the corner taps' });
+        if (metrics.normRatio < THRESHOLDS.normRatioWarn || metrics.normRatio > 1 / THRESHOLDS.normRatioWarn) {
+          warnings.push({ code: 'proportions', message: 'Sheet proportions look off — double-check the corner taps' });
         }
       }
     }

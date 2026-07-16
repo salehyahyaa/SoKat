@@ -76,13 +76,23 @@ test('true letter sheet passes pose checks; focal recovered', () => {
   if (fVP != null) assert.ok(Math.abs(fVP - 2900) / 2900 < 0.05, `fVP ${fVP}`);
 });
 
-test('starting on the SHORT edge is detected and rejected', () => {
+test('any tap order around the sheet: orientation auto-resolves, distance exact', () => {
   const s = wallScene({});
   // Rotate the tap order by one: user began along an 8.5-inch edge.
   const swapped = [s.paper[1], s.paper[2], s.paper[3], s.paper[0]];
-  const { checks } = checksFor(swapped, { exifFocal: 2900 });
-  assert.equal(checks.ok, false, JSON.stringify(checks.metrics));
-  assert.ok(checks.errors.some((e) => e.code === 'edge-order'), JSON.stringify(checks.errors));
+  // Emulate the app: try both world mappings, keep the better edge-norm ratio.
+  let best = null;
+  for (const [longIn, shortIn] of [[11, 8.5], [8.5, 11]]) {
+    const plane = new PlaneMeasurement(swapped, longIn, shortIn);
+    const checks = paperPoseChecks(swapped, IMG_W, IMG_H, { exifFocal: 2900, homographyColumns: plane.Hcols });
+    const ratioErr = Math.abs(Math.log(checks.metrics.normRatio ?? 1));
+    if (!best || ratioErr < best.ratioErr) best = { plane, checks, ratioErr, longIn };
+  }
+  assert.equal(best.longIn, 8.5); // the swapped mapping wins
+  assert.equal(best.checks.ok, true, JSON.stringify(best.checks.errors));
+  // and the measurement is still exact
+  const v = best.plane.distance(s.px([-20, 0, 0]), s.px([20, 0, 0]));
+  assert.ok(Math.abs(v - 40) < 1e-6, `v=${v}`);
 });
 
 test('non-rectangular "sheet" taps are rejected', () => {
