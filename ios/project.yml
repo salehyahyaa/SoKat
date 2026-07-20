@@ -1,0 +1,22 @@
+name: SpaceScan
+options:
+  bundleIdPrefix: com.sokat
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  SpaceScan:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSCameraUsageDescription: SpaceScan uses the camera and LiDAR to measure your space.
+        UIRequiredDeviceCapabilities: [arkit]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.9"
