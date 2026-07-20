@@ -294,3 +294,10 @@ button:active:not(:disabled) { transform: scale(0.98); }
   background: var(--bg); color: var(--text);
   border: 1px solid #2a3442; border-radius: 8px; padding: 6px;
 }
+
+/* ---------- precision mode ---------- */
+.how a { color: var(--accent); }
+#dims-precision { display: flex; padding: 10px 16px 6px; }
+#dims-precision .dim-card { flex: 1; padding: 16px 8px; }
+#dims-precision .dim-value { font-size: 2rem; }
+#dims-precision .dim-edit { font-size: 0.75rem; }

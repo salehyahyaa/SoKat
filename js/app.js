@@ -19,14 +19,14 @@ import { CameraCapture } from './camera.js';
 import { CornerPicker } from './picker.js';
 import { rectangleMetrology } from './metrology.js';
 import { buildEmptiedViews, PhotoEraser } from './emptier.js';
+import { runPrecisionScan } from './precision.js';
 import {
   validateWallQuad, validateEndpoints, validateResultDims, orthoResidual,
   focalFromVanishingPoints, confidenceView, confidenceOverall,
   toFraction, feetInches, errorBandPct, PLAUSIBLE,
 } from './validation.js';
 
-const RETAKE = Symbol('retake');
-const HOME = Symbol('home');
+import { RETAKE, HOME } from './flow.js';
 
 const TARGET_COLOR = '#00e5a0';
 const QUAD_COLOR = '#4da3ff';
@@ -52,6 +52,7 @@ export class SpaceScanApp {
     this.eraserView = null;
 
     this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
+    this.$('btn-precision').addEventListener('click', () => this.runGuarded(() => runPrecisionScan(this)));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
     this.$('dims').addEventListener('click', (e) => this.onDimTap(e));
     this.$('btn-erase-undo').addEventListener('click', () => { if (this.eraserView) this.eraserView.undo(); });
@@ -129,13 +130,16 @@ export class SpaceScanApp {
 
   // ---------------------------------------------------------------- capture
 
-  capturePhoto() {
+  capturePhoto({
+    title = 'One photo',
+    html = '<b>Stand up</b>, phone at chest height — that\'s how the app knows '
+      + 'the scale.<br>Photograph the <b>whole back wall</b>, floor to ceiling.',
+    illustration = 'wall-quad',
+  } = {}) {
     this.showScreen('capture');
-    this.$('capture-title').textContent = 'One photo';
-    this.$('capture-text').innerHTML =
-      '<b>Stand up</b>, phone at chest height — that\'s how the app knows '
-      + 'the scale.<br>Photograph the <b>whole back wall</b>, floor to ceiling.';
-    drawIllustration(this.$('capture-illust'), 'wall-quad');
+    this.$('capture-title').textContent = title;
+    this.$('capture-text').innerHTML = html;
+    drawIllustration(this.$('capture-illust'), illustration);
     const btnCam = this.$('btn-open-camera');
     const btnBack = this.$('btn-capture-home');
     return new Promise((resolve, reject) => {

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpaceScan — Precision target (print me)</title>
+  <!--
+    Printable calibration target for Precision mode. Geometry must stay in
+    exact sync with TARGET in js/target.js: an 8x5 checkerboard of 1.000in
+    squares (square (0,0) black, alternating), with four 0.6in black disc
+    fiducials centered 0.6in diagonally outside the board corners.
+    All dimensions use CSS physical inches; at "100% / Actual size" printing
+    they are exact.
+  -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #fff; color: #111; font-family: -apple-system, system-ui, sans-serif; }
+
+    .instructions {
+      max-width: 7.6in; margin: 16px auto; padding: 12px 16px;
+      background: #f2f4f7; border-radius: 10px; font-size: 14px; line-height: 1.55;
+    }
+    .instructions h1 { font-size: 17px; margin-bottom: 6px; }
+    .instructions b { color: #b00020; }
+    @media print { .instructions { display: none; } }
+
+    @page { size: letter landscape; margin: 0; }
+    .sheet {
+      /* Content box sized to stay inside any printer's margins; only the
+         geometry INSIDE the sheet matters, not its position on the page. */
+      width: 9.8in; height: 6.9in;
+      position: relative; margin: 0.15in auto;
+      page-break-inside: avoid;
+    }
+    /* Board top-left corner at (0.9in, 0.9in) inside .sheet, so the discs
+       (board coords -0.9..9.5 including radius) land at 0..9.8in. */
+    .board {
+      position: absolute; left: 0.9in; top: 0.9in;
+      width: 8in; height: 5in; font-size: 0;
+    }
+    .board .row { height: 1in; white-space: nowrap; }
+    .board .sq { display: inline-block; width: 1in; height: 1in; }
+    .board .b { background: #000; }
+    .disc {
+      position: absolute; width: 0.6in; height: 0.6in;
+      border-radius: 50%; background: #000;
+    }
+    .caption {
+      position: absolute; left: 0.9in; top: 6.6in; width: 8in;
+      font-size: 10px; color: #333; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="instructions">
+    <h1>SpaceScan precision target</h1>
+    Print this page on letter paper at <b>100% scale ("Actual Size" — never "Fit to page")</b>.
+    After printing, check with any ruler: the checkerboard must measure exactly
+    <b>8 × 5 inches</b>. If it doesn't, the print was scaled and measurements will be off
+    by the same factor. Tape the sheet <em>flat</em> on the surface you're measuring.
+  </div>
+
+  <div class="sheet">
+    <!-- Discs centered at board coords (-0.6,-0.6), (8.6,-0.6), (8.6,5.6), (-0.6,5.6):
+         sheet position = board coord + 0.9in offset, minus 0.3in radius. -->
+    <div class="disc" style="left: 0in;    top: 0in;"></div>
+    <div class="disc" style="left: 9.2in;  top: 0in;"></div>
+    <div class="disc" style="left: 9.2in;  top: 6.2in;"></div>
+    <div class="disc" style="left: 0in;    top: 6.2in;"></div>
+
+    <div class="board" id="board"></div>
+
+    <div class="caption">
+      SpaceScan precision target · board is exactly 8.000 × 5.000 in when printed at 100%
+    </div>
+  </div>
+
+  <script>
+    // 8x5 checkerboard, square (i,j) black iff (i+j) even — same rule as
+    // isBlackSquare() in js/target.js.
+    const board = document.getElementById('board');
+    let html = '';
+    for (let j = 0; j < 5; j++) {
+      html += '<div class="row">';
+      for (let i = 0; i < 8; i++) html += `<span class="sq${(i + j) % 2 === 0 ? ' b' : ''}"></span>`;
+      html += '</div>';
+    }
+    board.innerHTML = html;
+  </script>
+</body>
+</html>

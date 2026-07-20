@@ -33,6 +33,47 @@ export class Homography {
     ]);
   }
 
+  // Least-squares homography over N >= 4 correspondences (normalized DLT,
+  // normal equations). With exact data it reproduces solve(); with noisy
+  // data it spreads the error over all points instead of trusting any 4.
+  static solveLS(src, dst) {
+    if (src.length !== dst.length || src.length < 4) {
+      throw new Error('Homography.solveLS requires >= 4 point pairs');
+    }
+    if (src.length === 4) return Homography.solve(src, dst);
+    const Ts = normalizer(src);
+    const Td = normalizer(dst);
+    const s = src.map(Ts.apply);
+    const d = dst.map(Td.apply);
+
+    // Rows of the overdetermined system (h33 fixed to 1 in normalized space).
+    const M = Array.from({ length: 8 }, () => new Array(8).fill(0));
+    const v = new Array(8).fill(0);
+    const accumulate = (row, rhs) => {
+      for (let i = 0; i < 8; i++) {
+        v[i] += row[i] * rhs;
+        for (let j = 0; j < 8; j++) M[i][j] += row[i] * row[j];
+      }
+    };
+    for (let i = 0; i < s.length; i++) {
+      const { x, y } = s[i];
+      const { x: u, y: w } = d[i];
+      accumulate([x, y, 1, 0, 0, 0, -u * x, -u * y], u);
+      accumulate([0, 0, 0, x, y, 1, -w * x, -w * y], w);
+    }
+    const h = gaussianSolve(M, v);
+    const Hn = [
+      [h[0], h[1], h[2]],
+      [h[3], h[4], h[5]],
+      [h[6], h[7], 1],
+    ];
+    // Denormalize: H = Td^-1 * Hn * Ts.
+    const H = mat3mul(mat3mul(Td.inv, Hn), Ts.mat);
+    const k = H[2][2];
+    if (Math.abs(k) < 1e-12) throw new Error('Degenerate least-squares homography');
+    return new Homography(H.map((r) => r.map((x) => x / k)));
+  }
+
   // Map a point {x, y} through the homography (perspective divide).
   map(p) {
     const m = this.m;
@@ -45,6 +86,33 @@ export class Homography {
       y: (m[1][0] * p.x + m[1][1] * p.y + m[1][2]) / w,
     };
   }
+}
+
+// Hartley normalization: translate the centroid to the origin and scale the
+// mean distance to sqrt(2). Returns the transform, its inverse, and an apply().
+function normalizer(pts) {
+  let mx = 0; let my = 0;
+  for (const p of pts) { mx += p.x; my += p.y; }
+  mx /= pts.length; my /= pts.length;
+  let dist = 0;
+  for (const p of pts) dist += Math.hypot(p.x - mx, p.y - my);
+  dist /= pts.length;
+  const s = dist > 1e-12 ? Math.SQRT2 / dist : 1;
+  return {
+    mat: [[s, 0, -s * mx], [0, s, -s * my], [0, 0, 1]],
+    inv: [[1 / s, 0, mx], [0, 1 / s, my], [0, 0, 1]],
+    apply: (p) => ({ x: s * (p.x - mx), y: s * (p.y - my) }),
+  };
+}
+
+function mat3mul(A, B) {
+  const C = Array.from({ length: 3 }, () => new Array(3).fill(0));
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      for (let k = 0; k < 3; k++) C[i][j] += A[i][k] * B[k][j];
+    }
+  }
+  return C;
 }
 
 // Solve A x = b by Gaussian elimination with partial pivoting (mutates A and b).
