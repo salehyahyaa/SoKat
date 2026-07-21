@@ -291,8 +291,18 @@ export class SpaceScanApp {
 
   async runScan() {
     await this.showGuide();
-    const wall = await this.scanView();
+    await this.finishQuick(await this.scanView());
+  }
+
+  // Precision mode's no-sheet fallback: run the quick pipeline on a photo
+  // that was already taken, with a reduced-accuracy warning on the result.
+  async runQuickWithPhoto(photo, warningMsg) {
+    await this.finishQuick(await this.scanView(photo), warningMsg);
+  }
+
+  async finishQuick(wall, warningMsg = null) {
     const outcome = this.assemble(wall);
+    if (warningMsg) outcome.plaus.warnings.push({ code: 'no-sheet', message: warningMsg });
     if (!outcome.ok) {
       this.showBlocked(outcome);
       return;
@@ -302,9 +312,11 @@ export class SpaceScanApp {
 
   // Photo → wall outline (4 taps, calibrates pose + scale) → height (2 taps,
   // confirm) → width (2 taps, confirm).
-  async scanView() {
+  async scanView(initialPhoto = null) {
+    let pending = initialPhoto;
     while (true) {
-      const photo = await this.capturePhoto();
+      const photo = pending || await this.capturePhoto();
+      pending = null;
       if (await this.photoChecklist(photo) === RETAKE) continue;
       const imgW = photo.width; const imgH = photo.height;
 

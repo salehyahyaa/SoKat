@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — closet measurement</title>
-  <link rel="stylesheet" href="css/style.css?v=16">
+  <link rel="stylesheet" href="css/style.css?v=17">
 </head>
 <body>
   <main id="app">
@@ -90,6 +90,21 @@
         <a id="btn-target-pdf" class="secondary btn-link" href="target.pdf" download="SpaceScan-target.pdf">⬇ Download the target (PDF)</a>
         <button id="btn-pguide-continue" class="primary">I taped it — take the photo</button>
         <button id="btn-pguide-home" class="secondary">Back</button>
+      </div>
+    </section>
+
+    <!-- Precision: no sheet found -->
+    <section id="screen-nosheet" class="screen">
+      <header class="bar"><h2>No printed sheet found</h2></header>
+      <p class="body-text">
+        The checkerboard target isn't visible in this photo. You can still
+        measure without it, but accuracy drops from <b>1/16″</b> to about
+        <b>±5–8%</b> (the scale must be inferred from the shot).
+      </p>
+      <div class="stack push-down">
+        <button id="btn-nosheet-dots" class="primary">I taped it — tap its 4 dots</button>
+        <button id="btn-nosheet-continue" class="secondary">Continue without the sheet · ±5–8%</button>
+        <button id="btn-nosheet-retake" class="secondary">Retake photo</button>
       </div>
     </section>
 
@@ -196,6 +211,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=16"></script>
+  <script type="module" src="js/app.js?v=17"></script>
 </body>
 </html>

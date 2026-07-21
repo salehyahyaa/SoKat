@@ -27,6 +27,14 @@ export async function runPrecisionScan(app) {
   while (true) {
     const shot = await captureAndCalibrate(app, carry != null);
     if (!shot) continue;
+    if (shot.quick) {
+      // User chose to proceed without the sheet: quick pipeline, same photo,
+      // with the reduced-accuracy warning shown on the result.
+      await app.runQuickWithPhoto(shot.photo,
+        'No printed sheet in the photo — accuracy is about ±5–8%, not 1/16″. '
+        + 'Tape the printed target for verified accuracy.');
+      return;
+    }
     const { photo, calib } = shot;
 
     let needNewPhoto = false;
@@ -74,6 +82,30 @@ function precisionGuide(app) {
   });
 }
 
+// The sheet wasn't detected: let the user say whether it's actually there
+// (taped but missed → tap its dots), absent (continue at quick accuracy),
+// or worth a retake.
+function noSheetChoice(app) {
+  app.showScreen('nosheet');
+  const btnDots = app.$('btn-nosheet-dots');
+  const btnGo = app.$('btn-nosheet-continue');
+  const btnRetake = app.$('btn-nosheet-retake');
+  return new Promise((resolve) => {
+    const finish = (v) => { cleanup(); resolve(v); };
+    const onDots = () => finish('dots');
+    const onGo = () => finish('continue');
+    const onRetake = () => finish('retake');
+    const cleanup = () => {
+      btnDots.removeEventListener('click', onDots);
+      btnGo.removeEventListener('click', onGo);
+      btnRetake.removeEventListener('click', onRetake);
+    };
+    btnDots.addEventListener('click', onDots);
+    btnGo.addEventListener('click', onGo);
+    btnRetake.addEventListener('click', onRetake);
+  });
+}
+
 async function captureAndCalibrate(app, isSecondPhoto) {
   const photo = await app.capturePhoto({
     title: isSecondPhoto ? 'Second photo' : 'Photograph the target',
@@ -85,6 +117,9 @@ async function captureAndCalibrate(app, isSecondPhoto) {
 
   let discs = await app.withLoading('Finding the printed target…', 'looking for the 4 black dots', async () => detectDiscs(photo));
   if (!discs) {
+    const choice = await noSheetChoice(app);
+    if (choice === 'retake') return null;
+    if (choice === 'continue') return { quick: true, photo };
     const pts = await app.pickStage(photo, {
       title: 'Target not found — tap its 4 dots',
       labels: DISC_LABELS,
