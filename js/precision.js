@@ -1,8 +1,9 @@
 /**
  * Precision mode — 1/16″ measurement against the printed target
  * (target.html). User flow: tape the target → one photo → the app auto-finds
- * the target and calibrates on its 28 crossings → tap 2 endpoints → answer
- * with a measured (not assumed) error band. If the band exceeds 1/16″, the
+ * the target and calibrates on its 28 crossings → tap the 2 ends of the
+ * width and the 2 ends of the height → both answers with a measured (not
+ * assumed) error band. If the band exceeds 1/16″, the
  * user can add a second photo and the two readings are averaged.
  *
  * This file is the DOM glue; all math lives in js/target.js and is tested
@@ -42,15 +43,21 @@ export async function runPrecisionScan(app) {
       const pts = await pickEndpoints(app, photo, calib, carry != null);
       if (pts === RETAKE) { carry = null; needNewPhoto = true; continue; }
 
-      const value = calib.plane.distance(pts[0], pts[1]);
-      const band = calib.plane.band(pts[0], pts[1]);
-      let display = { value, band, averaged: false };
+      const reading = {
+        width: calib.plane.distance(pts[0], pts[1]),
+        height: calib.plane.distance(pts[2], pts[3]),
+        bandW: calib.plane.band(pts[0], pts[1]),
+        bandH: calib.plane.band(pts[2], pts[3]),
+      };
+      let display = { ...reading, averaged: false };
       if (carry) {
         display = {
-          value: (carry.value + value) / 2,
+          width: (carry.width + reading.width) / 2,
+          height: (carry.height + reading.height) / 2,
           // Two independent photos: calibration and taps are independent, so
           // the averaged band tightens by ~sqrt(2).
-          band: Math.max(carry.band, band) / Math.SQRT2,
+          bandW: Math.max(carry.bandW, reading.bandW) / Math.SQRT2,
+          bandH: Math.max(carry.bandH, reading.bandH) / Math.SQRT2,
           averaged: true,
         };
         carry = null;
@@ -58,7 +65,8 @@ export async function runPrecisionScan(app) {
 
       const action = await showPrecisionResult(app, display, calib);
       if (action === 'again') continue;
-      if (action === 'improve') { carry = { value, band }; needNewPhoto = true; continue; }
+      if (action === 'improve') { carry = reading; needNewPhoto = true; continue; }
+      app.showScreen('welcome');
       return; // done
     }
   }
@@ -146,33 +154,35 @@ async function captureAndCalibrate(app, isSecondPhoto) {
 
 function pickEndpoints(app, photo, calib, isSecondPhoto) {
   const plane = calib.plane;
-  const label = (p2) => {
-    const v = plane.distance(p2[0], p2[1]);
-    const b = plane.band(p2[0], p2[1]);
-    return `${toFraction(v)} (±${bandSixteenths(b)}/16″)`;
-  };
   return app.pickStage(photo, {
-    title: isSecondPhoto ? 'Tap the SAME two endpoints' : 'Measure',
-    labels: ['FIRST endpoint of the distance', 'SECOND endpoint'],
+    title: isSecondPhoto ? 'Tap the SAME four points' : 'Measure',
+    labels: [
+      'LEFT end of the WIDTH',
+      'RIGHT end of the WIDTH',
+      'TOP end of the HEIGHT',
+      'BOTTOM end of the HEIGHT',
+    ],
     illustration: 'width',
-    segments: [[0, 1]],
+    segments: [[0, 1], [2, 3]],
     segmentLabel: (i, j, a, b) => toFraction(plane.distance(a, b)),
     acceptText: 'Accept',
-    doneText: (p2) => `${label(p2)} — drag to adjust, then Accept`,
+    doneText: (p) => `W ${toFraction(plane.distance(p[0], p[1]))} × H ${toFraction(plane.distance(p[2], p[3]))} — drag to adjust, then Accept`,
     validate: () => ({ ok: true, warnings: [] }),
   });
 }
 
 function showPrecisionResult(app, display, calib) {
   app.showScreen('presult');
-  const verified = display.band <= SIXTEENTH;
+  const band = Math.max(display.bandW, display.bandH);
+  const verified = band <= SIXTEENTH;
   const badge = app.$('presult-badge');
   badge.textContent = verified
-    ? `✓ within ±1/16″ (band ±${bandSixteenths(display.band)}/16″)`
-    : `±${bandSixteenths(display.band)}/16″ — wider than 1/16″`;
+    ? `✓ within ±1/16″ (band ±${bandSixteenths(band)}/16″)`
+    : `±${bandSixteenths(band)}/16″ — wider than 1/16″`;
   badge.className = `badge conf-${verified ? 'high' : 'medium'}`;
 
-  app.$('presult-value').textContent = toFraction(display.value);
+  app.$('presult-width').textContent = toFraction(display.width);
+  app.$('presult-height').textContent = toFraction(display.height);
   app.$('presult-sub').textContent = display.averaged
     ? 'average of two photos'
     : (verified ? '' : 'tighter: retake closer to the target, or add a second photo');

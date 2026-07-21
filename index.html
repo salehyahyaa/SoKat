@@ -79,7 +79,7 @@
       <ol class="how">
         <li><b>Print the target</b> at 100% scale</li>
         <li><b>Tape it flat</b> on the surface you're measuring</li>
-        <li><b>One photo</b> of the target + your span, then <b>tap 2 endpoints</b></li>
+        <li><b>One photo</b> of the target + your span, then <b>tap the ends of the width and height</b></li>
       </ol>
       <ul class="checklist">
         <li><b>Same surface:</b> the target and both endpoints must lie on one flat plane</li>
@@ -116,12 +116,14 @@
     <section id="screen-presult" class="screen">
       <header class="bar"><h2>Measured</h2></header>
       <div id="presult-badge" class="badge"></div>
-      <div id="dims-precision"><div class="dim-card"><div class="dim-label">distance</div>
-        <div class="dim-value" id="presult-value"></div>
-        <div class="dim-edit" id="presult-sub"></div></div></div>
+      <div id="dims-precision"><div class="dim-card"><div class="dim-label">width</div>
+        <div class="dim-value" id="presult-width"></div></div>
+        <div class="dim-card"><div class="dim-label">height</div>
+        <div class="dim-value" id="presult-height"></div></div>
+        <div class="dim-edit" id="presult-sub"></div></div>
       <p class="hint" id="presult-diag"></p>
       <div class="stack push-down">
-        <button id="btn-presult-again" class="primary">Measure another distance (same photo)</button>
+        <button id="btn-presult-again" class="primary">Measure again (same photo)</button>
         <button id="btn-presult-improve" class="secondary">Add a 2nd photo — tighter answer</button>
         <button id="btn-presult-done" class="secondary">Done</button>
       </div>
@@ -215,6 +217,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=19"></script>
+  <script type="module" src="js/app.js?v=20"></script>
 </body>
 </html>
