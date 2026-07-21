@@ -34,6 +34,20 @@ from," and each answer has a different accuracy ceiling:
 - LiDAR measures depth directly, but coarsely (sparse grid, ~1% depth error) → half-inch-level.
 - Precision puts a manufactured ground-truth object *into the photo* → sub-sixteenth-level, and uniquely, **it can verify its own accuracy on every shot** (§5.6).
 
+### Accuracy in plain inches
+
+If someone asks "how far off will the number be," the answer per mode:
+
+| Mode | How far off, in inches |
+|---|---|
+| **Quick Scan** | Off by up to **2 to 3 inches** on a typical closet. If you correct any one dimension with a tape measure, the rest tighten to within about **half an inch**. |
+| **LiDAR Scan** | Off by up to **half an inch**, regardless of room size — that's the limit of the sensor. |
+| **Precision** | Off by no more than **1/16 of an inch** for anything on or near the printed target — in testing, the typical error was **3/100 of an inch** and the single worst case was **5/100 of an inch** on a 26-inch span (§6.2). Far from the target it degrades to within **1/8 to 1/4 of an inch**. |
+
+Rule of thumb: Quick is off by a couple of inches, LiDAR by half an inch,
+Precision by less than the thickness of a nickel — and Precision prints its
+actual error range on every photo (§5.5).
+
 ---
 
 ## 2. Repository layout
@@ -601,7 +615,140 @@ encryption metadata are already configured in `project.yml`.
 
 ---
 
-## 10. Honest summary
+## 10. Object removal — the "Cleanup" eraser (beta)
+
+On the results screen you can erase objects from the photo to see the space
+empty (`js/emptier.js`). How it works, honestly:
+
+- The photo is downscaled to a ≤1600px display copy. Dragging paints a
+  feathered selection; on release the hole is **inpainted**: a diffusion pass
+  (60 Jacobi iterations at ≤200px working resolution) fills smooth color from
+  the hole's borders, then exemplar texture synthesis copies real surrounding
+  texture into it, plus 5% grain so the patch doesn't look plastic. "Clear
+  all" inpaints the whole tapped 6-corner region in one shot.
+- **It is classical image processing, not ML** — no model, no generation,
+  nothing leaves the device, and nothing synthetic is painted except these
+  fills sourced from the photo's own pixels.
+- **It is cosmetic only.** Erasing never touches the measurements — those are
+  computed from the tapped corners on the original photo. It exists so a
+  cluttered space can be *presented* empty, with dimensions overlaid.
+- Undo/reset are full-canvas snapshots; it's labeled beta because a large
+  textured hole (patterned rug, bookshelf) can smear — a known limit of
+  diffusion+exemplar methods without ML.
+
+---
+
+## 11. Security and privacy
+
+The honest one-liner: **the photo never leaves the phone.**
+
+- There are zero network calls in the application code — no `fetch`, no
+  XHR, no beacons, no analytics, no third-party scripts. The only network
+  traffic is GitHub Pages serving the static files themselves.
+- All processing — corner detection, homography, calibration, EXIF parsing,
+  inpainting — runs in-browser on-device. EXIF (which can contain GPS) is
+  read locally to identify the lens and is never transmitted or stored.
+- Zero runtime dependencies (`package.json` has none), so there is no
+  supply-chain surface: no CDN scripts, no npm packages shipping to users.
+  The build tool (esbuild) is dev-only and not what Pages serves.
+- No accounts, no cookies, no localStorage of photos; camera access is the
+  standard `<input capture>` — the browser's permission prompt is the gate.
+- The native iOS app is the same: ARKit runs on-device; the app has no
+  networking code. MIT-licensed, fully auditable.
+
+---
+
+## 12. Architectural decisions and trade-offs
+
+The decisions someone will probe, and why they went this way:
+
+- **Zero dependencies, vanilla JS — no OpenCV, no framework.** The math
+  actually needed (DLT homography, Levenberg-style least squares, saddle-point
+  refinement) is a few hundred lines; OpenCV.js is ~8MB of WASM that would
+  dominate load time on a phone for <5% of its surface. Owning the numerics
+  also made the 1/16″ claim auditable line-by-line — nothing is a black box.
+  Trade-off: no battle-tested library; mitigated by 52 tests including
+  end-to-end synthetic-image validation (§6).
+- **No backend.** A static site means no server cost, no photo upload, no
+  privacy story to defend (§11), and push-to-`main` deploys. Trade-off: all
+  compute must fit a phone browser — which drove choices like the ≤200px
+  inpainting working resolution and pure-JS detection.
+- **Web-first, native only where physics requires it.** Safari cannot access
+  LiDAR, so LiDAR mode is a thin native ARKit app; everything else stays on
+  the web for zero-install reach. Trade-off: the browser also hides lens
+  intrinsics and distortion-free RAW frames — the single biggest accuracy
+  cost (§8) — accepted because Precision's printed target restores ground
+  truth *inside the image*, where the browser can't take it away.
+- **Reference-plane homography over 3D reconstruction.** One photo + one
+  known plane gives closed-form, verifiable in-plane measurements. Full
+  multi-view SfM would remove the "near the plane" restriction but adds
+  capture complexity and failure modes that can't self-verify per shot.
+- **Per-photo self-verification over global claims** (§5.6): every photo
+  holds out reference crossings and measures its own error. The accuracy
+  badge is *evidence from this photo*, not a lab number extrapolated.
+- **No build step in development** — ES modules served raw; esbuild `dist/`
+  exists only for size tracking. Trade-off: the `?v=N` cache-buster and the
+  module-identity footgun (§9) are the tax.
+
+---
+
+## 13. If you get grilled — hard questions, straight answers
+
+Each answer is one breath; the section reference is the deep dive.
+
+1. **"Why should I believe 1/16″ from a phone photo?"** Because the claim is
+   verified, not asserted: a printed sheet of exactly-1.000″ squares is in
+   the photo; 28 crossings are localized to ~0.05px; some are held out, and
+   every single photo measures its own error on them before showing a badge
+   (§5.4–5.6).
+2. **"Did you validate it physically?"** In simulation, exhaustively — 600
+   rendered photos, p95 error 0.030″ on a 26″ span, worst case 0.051″, zero
+   exclusions (§6.2). The physical trial is defined but not yet executed
+   (§6.6) — I'll say that before you ask.
+3. **"What's the biggest open risk?"** Real-lens radial distortion, which the
+   browser can't calibrate away. It's detectable per photo (the self-check
+   reports it) and fixable natively with undistortion (§7, §8).
+4. **"What breaks the accuracy?"** Measuring far from the target plane,
+   non-1× lenses, curled or mis-scaled printouts, motion blur — each is
+   listed with its cost, and the app warns or widens its error band rather
+   than staying silent (§7, §5.5).
+5. **"Why didn't you use ML?"** Nothing here is a perception problem ML would
+   improve: scale comes from geometry, and a learned model can't certify
+   1/16″. Deterministic numerics are auditable and testable (§12).
+6. **"Why no OpenCV?"** ~8MB of WASM for a few hundred lines of math I
+   needed to own anyway to defend the accuracy claim (§12).
+7. **"Why the browser instead of a real app?"** Zero-install reach; native is
+   used exactly where the browser physically can't go (LiDAR). The browser's
+   real costs are catalogued in §8, and Precision's design exists to beat
+   them.
+8. **"How do you know a given user's photo was good?"** The photo proves it
+   itself: held-out reference crossings are re-measured and the residual is
+   shown. Bad photo → wide band or a refusal, never a confident wrong number
+   (§5.6).
+9. **"How did you test camera code without a camera?"** The test suite
+   renders synthetic photos in pure JS with known ground truth (52 tests,
+   `npm test`); browser e2e uses Playwright injecting canvas-generated photos
+   and sub-pixel `PointerEvent` taps (§6.1, §9).
+10. **"What about 0.5×/2× lenses?"** EXIF identifies the lens; when EXIF is
+    missing the app assumes 1× and **visibly warns** that scale may be wrong
+    (§7).
+11. **"Quick Scan says ±5–8% — why ship a guess?"** Because it's labeled a
+    guess: zero setup for an estimate, one tape-corrected number brings it to
+    ~±1%, and users who need truth get Precision (§1 table, §3).
+12. **"The object removal — is that AI fabricating my room?"** No — classical
+    diffusion + texture copied from the photo's own pixels, cosmetic only,
+    and measurements never come from the edited image (§10).
+13. **"Where do photos go?"** Nowhere. No network calls exist in the code;
+    processing is on-device; the site is static files (§11).
+14. **"What would you do next?"** In order: run the physical acceptance
+    protocol (§6.6); a native Precision mode with lens undistortion to hold
+    1/16″ over larger spans (§8); auto-detection of the target corners to
+    remove taps; and graduating the eraser from beta with a patch-match
+    quality pass.
+
+---
+
+## 14. Honest summary
 
 - **Quick**: instant, ±5–8% *if* held at chest height with the 1× lens —
   a good estimate, never a measurement. Correct one number by tape and it
