@@ -334,7 +334,12 @@ export class SpaceScanApp {
           if (!g.ok) return g;
           let m2;
           try {
-            m2 = rectangleMetrology(pts, imgW, imgH, { focalPx: photo.focalPx || null });
+            // 26mm-equiv iPhone main camera as a last resort when there's no
+            // EXIF and the shot is too frontal to recover the focal from.
+            m2 = rectangleMetrology(pts, imgW, imgH, {
+              focalPx: photo.focalPx || null,
+              assumedFocalPx: (Math.max(imgW, imgH) * 26) / 36,
+            });
           } catch (err) {
             return { ok: false, errors: [{ code: 'pose', message: `${err.message}` }] };
           }
@@ -356,6 +361,7 @@ export class SpaceScanApp {
             focalVP: fVP,
             focalEXIF: photo.focalPx || null,
             focalUsed: m2.f,
+            focalSourceUsed: m2.focalSource || (photo.focalPx ? 'exif' : 'recovered'),
             focalDisagreePct: (fVP && photo.focalPx) ? Math.abs(fVP - photo.focalPx) / photo.focalPx * 100 : null,
             impliedWallHeight: s,
           };
@@ -482,7 +488,7 @@ export class SpaceScanApp {
     this.$('diag-panel').textContent = [
       `dims (unrounded): W ${o.dims.width.toFixed(4)}″  H ${o.dims.height.toFixed(4)}″`,
       `wall outline: ${(p.areaFrac * 100).toFixed(1)}% of frame · rectangularity residual ${p.ortho.toFixed(4)}`,
-      `focal: EXIF ${p.focalEXIF ? p.focalEXIF.toFixed(0) : 'none'} · VP ${p.focalVP ? p.focalVP.toFixed(0) : 'n/a'}${p.focalDisagreePct != null ? ` (Δ${p.focalDisagreePct.toFixed(1)}%)` : ''} · used ${p.focalUsed.toFixed(0)}`,
+      `focal: EXIF ${p.focalEXIF ? p.focalEXIF.toFixed(0) : 'none'} · VP ${p.focalVP ? p.focalVP.toFixed(0) : 'n/a'}${p.focalDisagreePct != null ? ` (Δ${p.focalDisagreePct.toFixed(1)}%)` : ''} · used ${p.focalUsed.toFixed(0)} (${p.focalSourceUsed || 'exif'})`,
       `scale: assumed phone height ${PHONE_HEIGHT_IN}″ → implied wall height ${p.impliedWallHeight.toFixed(1)}″${o.corrected ? ` · overridden by your ${o.corrected}` : ''}`,
       `confidence: ${o.conf.score}/100`,
       '',

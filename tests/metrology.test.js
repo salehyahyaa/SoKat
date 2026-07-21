@@ -167,3 +167,20 @@ test('wall quad: recovered focal path also yields exact scale', () => {
   const scale = 58 / Math.abs(m.C[1]);
   assert.ok(Math.abs(scale - H) < 1e-4, `H est ${scale}`);
 });
+
+// A dead-frontal wall shot has no vanishing-point perspective, so the focal
+// can't be recovered — with no EXIF this used to hard-fail ("could not read
+// the camera's focal length"), stranding real users. The assumed-focal
+// fallback must engage instead, and with the true focal matching the
+// assumption the wall dimensions come out exact.
+test('frontal wall + no EXIF: assumed focal unblocks the scan', () => {
+  const W = 60; const H = 96;
+  const f = (Math.max(IMG_W, IMG_H) * 26) / 36; // matches the app's assumption
+  const cam = new PinholeCamera({ eye: [0, 48, 90], target: [0, 48, 0], f, cx: IMG_W / 2, cy: IMG_H / 2 });
+  const quad = [[-W / 2, 0, 0], [W / 2, 0, 0], [W / 2, H, 0], [-W / 2, H, 0]].map((p) => cam.project(p));
+  assert.throws(() => rectangleMetrology(quad, IMG_W, IMG_H, {}), /focal length/);
+  const m = rectangleMetrology(quad, IMG_W, IMG_H, { assumedFocalPx: f });
+  assert.equal(m.focalSource, 'assumed');
+  const ratio = m.distance(quad[0], quad[1]) / m.distance(quad[1], quad[2]);
+  assert.ok(Math.abs(ratio - W / H) < 1e-6, `aspect ${ratio} vs ${W / H}`);
+});

@@ -164,7 +164,12 @@ export class SingleViewMetrology {
  * cornersPx: floor rectangle in cycle order [backL, backR, frontR, frontL].
  * Returns a SingleViewMetrology whose unit is "one depth" (D = 1).
  */
-export function rectangleMetrology(cornersPx, imageW, imageH, { focalPx = null } = {}) {
+// assumedFocalPx: last-resort focal (e.g. the iPhone main camera's 26mm-equiv)
+// used when there is no EXIF focal AND the quad is too frontal for recovery —
+// a head-on wall shot has no vanishing-point perspective to read a focal
+// from, and blocking there stranded real users. The assumption costs a few
+// percent at most, which the quick mode's ±5-8% band already covers.
+export function rectangleMetrology(cornersPx, imageW, imageH, { focalPx = null, assumedFocalPx = null } = {}) {
   const cx = imageW / 2;
   const cy = imageH / 2;
   const world = [
@@ -178,19 +183,24 @@ export function rectangleMetrology(cornersPx, imageW, imageH, { focalPx = null }
   const h2 = [Hpi[0][1], Hpi[1][1], Hpi[2][1]];
 
   let f = focalPx;
+  let focalSource = focalPx ? 'exif' : 'recovered';
   if (!f) {
     // Only the orthogonality constraint holds for a non-square rectangle.
     const d1 = [h1[0] - h1[2] * cx, h1[1] - h1[2] * cy, h1[2]];
     const d2 = [h2[0] - h2[2] * cx, h2[1] - h2[2] * cy, h2[2]];
     const den = d1[2] * d2[2];
     const f2 = Math.abs(den) > 1e-12 ? -(d1[0] * d2[0] + d1[1] * d2[1]) / den : NaN;
-    if (!(f2 > 0) || !Number.isFinite(f2)) {
+    if (f2 > 0 && Number.isFinite(f2)) {
+      f = Math.sqrt(f2);
+    } else if (assumedFocalPx) {
+      f = assumedFocalPx;
+      focalSource = 'assumed';
+    } else {
       throw new Error(
         'Could not read the camera\'s focal length from this photo — retake '
         + 'the photo from a natural standing angle',
       );
     }
-    f = Math.sqrt(f2);
   }
 
   // Aspect ratio W/D from the column norms of K^-1 H.
@@ -201,9 +211,11 @@ export function rectangleMetrology(cornersPx, imageW, imageH, { focalPx = null }
   if (!Number.isFinite(aspect) || aspect <= 0) {
     throw new Error('Corner taps look degenerate — re-tap the 4 floor corners');
   }
-  return new SingleViewMetrology(cornersPx, imageW, imageH, {
+  const m = new SingleViewMetrology(cornersPx, imageW, imageH, {
     focalPx: f, longIn: aspect, shortIn: 1,
   });
+  m.focalSource = focalSource;
+  return m;
 }
 
 function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
