@@ -42,7 +42,7 @@ struct ModeHome: View {
                 Button {
                     webURL = WebDestination(url: URL(string: Self.webBase + "?mode=precision")!)
                 } label: {
-                    modeRow("checkerboard.rectangle", "Precision", "printed target · verified to 1/16″")
+                    modeRow("checkerboard.rectangle", "Precision", "printed target · 1/16″ near the sheet")
                 }
 
                 Spacer()
