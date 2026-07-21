@@ -282,6 +282,47 @@ line shows it: `held-out calibration check ±0.04/16″ at the target`.
   square), or **unverifiable calibration** → hard stop with a specific
   instruction (move closer / improve light / reprint), never a silent guess.
 
+### 5.8 Is it exactly 1/16″, or better? (the direct answer)
+
+**Better. 1/16″ is the guaranteed envelope, not the typical error.** Measured
+distribution on a 26″ span (300 trials, realistic tap noise — §6.2):
+
+- **Typical (median) error: 0.010″ ≈ 1/100″** — about 6× better than 1/16″.
+- **95% of measurements: within 0.030″ ≈ 1/33″** — 2× better than 1/16″.
+- **Worst single trial of 600 (two poses): 0.051″** — still inside 1/16″.
+- With **zero tap noise** the pipeline itself is good to **0.0005″ ≈ 1/2000″**
+  — meaning nearly all real-world error is the user's two fingertip taps, not
+  the math or calibration.
+
+So "accurate to 1/16″" means: near the target, the p95 error is under 1/16″
+and the app *certifies each individual photo* against that threshold. Accuracy
+degrades smoothly (and is reported honestly) as endpoints move away from the
+sheet — the number on screen always comes with the band it actually earned.
+
+**How it gets there — the complete recipe (what we use):**
+
+1. **A manufactured ground truth in the photo**: the printed 8×5″ checkerboard
+   — 1.000″ squares, tolerance set by laser-printer accuracy (~0.1–0.3%),
+   verified by the user with a ruler. This eliminates every scale assumption
+   (phone height, lens, distance) in one stroke.
+2. **28 reference points, not 4**: the grid's interior X-crossings give 28
+   precisely known positions to calibrate against.
+3. **Sub-pixel corner localization** (~0.05px): iterative gradient refinement
+   (the OpenCV `cornerSubPix` algorithm) — ~20× more precise than a careful
+   human fingertip tap.
+4. **Least-squares homography** (Hartley-normalized DLT) over all 28 points —
+   calibration error averages down instead of riding on any single corner.
+5. **Loupe-assisted endpoint taps** (~0.5px): the magnifier UI is what keeps
+   the dominant error term small.
+6. **Per-photo held-out verification**: calibrate on half the crossings,
+   measure the other half against truth — accuracy is *measured on every
+   photo*, not assumed.
+7. **An honest error band** with every answer (calibration × lever arm + tap
+   noise), proven in testing to never understate the real error.
+
+Nothing exotic — no AI, no depth sensor, no cloud. Classical projective
+geometry plus a piece of paper, executed carefully.
+
 ---
 
 ## 6. Validation of the 1/16″ claim
