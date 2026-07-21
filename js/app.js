@@ -401,6 +401,14 @@ export class SpaceScanApp {
   assemble(wall) {
     const dims = { width: wall.measures.width, height: wall.measures.height };
     const plaus = validateResultDims(dims);
+    if (wall.pose.focalSourceUsed === 'assumed') {
+      plaus.warnings.push({
+        code: 'assumed-lens',
+        message: 'Lens unknown (no photo metadata) — the 1× lens was assumed. '
+          + 'If you shot at 0.5× or 2×, every number is off by that same factor: '
+          + 'retake at 1×, or tap a number and enter one known measurement.',
+      });
+    }
 
     const conf0 = confidenceView({
       paperAreaFrac: wall.pose.areaFrac * 2, // wall quads are naturally large
