@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — closet measurement</title>
-  <link rel="stylesheet" href="css/style.css?v=15">
+  <link rel="stylesheet" href="css/style.css?v=16">
 </head>
 <body>
   <main id="app">
@@ -17,18 +17,22 @@
         <h1>Space<span>Scan</span></h1>
         <p class="tagline">Width &amp; height from one iPhone photo. Nothing to type, nothing to tape up.</p>
       </div>
-      <ol class="how">
-        <li><b>One photo</b> of the back wall</li>
-        <li><b>Tap</b> its 4 corners, then 2 points per measurement</li>
-        <li><b>Done</b> — width &amp; height</li>
-      </ol>
-      <p class="supported">
-        Sensor: the iPhone camera (Safari has no LiDAR access). Scale is
-        inferred from the shot — tap any result to fine-tune it.
-      </p>
-      <div class="stack">
+      <div id="mode-list" class="stack">
+        <button class="mode-card selected" data-mode="quick">
+          <span class="mode-name">Quick Scan</span>
+          <span class="mode-sub">one photo, nothing to set up · ±5–8%</span>
+        </button>
+        <button class="mode-card" data-mode="lidar">
+          <span class="mode-name">LiDAR Scan</span>
+          <span class="mode-sub">iOS app · aim &amp; tap · about ±0.5″</span>
+        </button>
+        <button class="mode-card" data-mode="precision">
+          <span class="mode-name">Precision</span>
+          <span class="mode-sub">printed target · verified to 1/16″</span>
+        </button>
+      </div>
+      <div class="stack push-down">
         <button id="btn-start" class="primary">Start</button>
-        <button id="btn-precision" class="secondary">Precision · 1/16″ (printed target)</button>
       </div>
       <p class="footnote">Runs on this phone — no install, no server.</p>
     </section>
@@ -55,11 +59,25 @@
       </div>
     </section>
 
+    <!-- LiDAR info -->
+    <section id="screen-lidar" class="screen">
+      <header class="bar"><h2>LiDAR Scan</h2></header>
+      <p class="body-text">
+        LiDAR is a laser depth sensor that Safari can't access — this mode runs
+        in the <b>SpaceScan iOS app</b>. Aim the crosshair, tap <b>+</b> four
+        times, read width &amp; height at about ±0.5″. No photo, no taping.
+      </p>
+      <p class="body-text">Available via TestFlight — ask Saleh for an invite.</p>
+      <div class="stack push-down">
+        <button id="btn-lidar-home" class="secondary">Back</button>
+      </div>
+    </section>
+
     <!-- Precision guide -->
     <section id="screen-pguide" class="screen">
       <header class="bar"><h2>Precision — 1/16″</h2></header>
       <ol class="how">
-        <li><b>Print the target</b> at 100% scale — <a href="target.html" target="_blank" rel="noopener">open &amp; print it</a></li>
+        <li><b>Print the target</b> at 100% scale</li>
         <li><b>Tape it flat</b> on the surface you're measuring</li>
         <li><b>One photo</b> of the target + your span, then <b>tap 2 endpoints</b></li>
       </ol>
@@ -69,6 +87,7 @@
         <li>Check the print: the checkerboard must be exactly <b>8 × 5 in</b></li>
       </ul>
       <div class="stack push-down">
+        <a id="btn-target-pdf" class="secondary btn-link" href="target.pdf" download="SpaceScan-target.pdf">⬇ Download the target (PDF)</a>
         <button id="btn-pguide-continue" class="primary">I taped it — take the photo</button>
         <button id="btn-pguide-home" class="secondary">Back</button>
       </div>
@@ -177,6 +196,6 @@
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-  <script type="module" src="js/app.js?v=15"></script>
+  <script type="module" src="js/app.js?v=16"></script>
 </body>
 </html>

@@ -301,3 +301,19 @@ button:active:not(:disabled) { transform: scale(0.98); }
 #dims-precision .dim-card { flex: 1; padding: 16px 8px; }
 #dims-precision .dim-value { font-size: 2rem; }
 #dims-precision .dim-edit { font-size: 0.75rem; }
+
+/* ---------- welcome mode picker ---------- */
+#mode-list { margin-bottom: 12px; }
+.mode-card {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  background: var(--panel); color: var(--text);
+  border: 2px solid transparent; border-radius: 14px; padding: 14px 16px;
+}
+.mode-card.selected { border-color: var(--accent); }
+.mode-card.selected .mode-name { color: var(--accent); }
+.mode-name { font-weight: 700; font-size: 1rem; }
+.mode-sub { color: var(--muted); font-size: 0.8rem; }
+.btn-link {
+  display: block; text-align: center; text-decoration: none;
+  border-radius: 14px; padding: 16px; font-size: 1.05rem; font-weight: 600;
+}

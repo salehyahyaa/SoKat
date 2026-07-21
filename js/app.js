@@ -51,8 +51,20 @@ export class SpaceScanApp {
     this.picker = null;
     this.eraserView = null;
 
-    this.$('btn-start').addEventListener('click', () => this.runGuarded(() => this.runScan()));
-    this.$('btn-precision').addEventListener('click', () => this.runGuarded(() => runPrecisionScan(this)));
+    this.mode = 'quick';
+    this.$('mode-list').addEventListener('click', (e) => {
+      const card = e.target.closest('.mode-card');
+      if (!card) return;
+      this.mode = card.dataset.mode;
+      for (const c of this.doc.querySelectorAll('.mode-card')) {
+        c.classList.toggle('selected', c === card);
+      }
+    });
+    this.$('btn-start').addEventListener('click', () => {
+      if (this.mode === 'lidar') { this.showScreen('lidar'); return; }
+      this.runGuarded(() => (this.mode === 'precision' ? runPrecisionScan(this) : this.runScan()));
+    });
+    this.$('btn-lidar-home').addEventListener('click', () => this.showScreen('welcome'));
     this.$('btn-restart').addEventListener('click', () => this.showScreen('welcome'));
     this.$('dims').addEventListener('click', (e) => this.onDimTap(e));
     this.$('btn-erase-undo').addEventListener('click', () => { if (this.eraserView) this.eraserView.undo(); });
