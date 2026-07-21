@@ -62,6 +62,10 @@ export class SpaceScanApp {
       p.hidden = !p.hidden;
     });
     this.showScreen('welcome');
+    // Deep link used by the iOS app's mode picker.
+    if (new URLSearchParams(window.location.search).get('mode') === 'precision') {
+      this.runGuarded(() => runPrecisionScan(this));
+    }
   }
 
   async runGuarded(fn) {

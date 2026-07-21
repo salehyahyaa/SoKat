@@ -1,10 +1,87 @@
 import SwiftUI
+import SafariServices
 
 @main
 struct SpaceScanApp: App {
     var body: some Scene {
-        WindowGroup { ContentView() }
+        WindowGroup { ModeHome() }
     }
+}
+
+/// Home screen offering all three measuring modes. LiDAR runs natively;
+/// Quick and Precision are the web app (same engine as the browser version),
+/// opened in an in-app Safari sheet.
+struct ModeHome: View {
+    private static let webBase = "https://salehyahyaa.github.io/SoKat/"
+    @State private var webURL: WebDestination?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                Spacer()
+                VStack(spacing: 6) {
+                    Text("SpaceScan").font(.largeTitle.bold())
+                    Text("Measure any space with your iPhone")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+
+                NavigationLink {
+                    ContentView()
+                        .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    modeRow("ruler", "LiDAR Scan", "aim & tap, no setup · about ±0.5″")
+                }
+
+                Button {
+                    webURL = WebDestination(url: URL(string: Self.webBase)!)
+                } label: {
+                    modeRow("camera.viewfinder", "Quick Scan", "one photo, nothing to tape · ±5–8%")
+                }
+
+                Button {
+                    webURL = WebDestination(url: URL(string: Self.webBase + "?mode=precision")!)
+                } label: {
+                    modeRow("checkerboard.rectangle", "Precision", "printed target · verified to 1/16″")
+                }
+
+                Spacer()
+            }
+            .padding()
+            .preferredColorScheme(.dark)
+            .sheet(item: $webURL) { dest in
+                SafariView(url: dest.url).ignoresSafeArea()
+            }
+        }
+    }
+
+    private func modeRow(_ icon: String, _ title: String, _ sub: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.title2).frame(width: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(sub).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .foregroundStyle(.primary)
+    }
+}
+
+private struct WebDestination: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
+
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
 }
 
 struct ContentView: View {
