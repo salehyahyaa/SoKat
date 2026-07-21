@@ -314,6 +314,15 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .mode-name { font-weight: 700; font-size: 1rem; }
 .mode-sub { color: var(--muted); font-size: 0.8rem; }
 .btn-link {
-  display: block; text-align: center; text-decoration: none;
-  border-radius: 14px; padding: 16px; font-size: 1.05rem; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  text-align: center; text-decoration: none;
+  background: var(--panel); color: var(--accent);
+  border: 2px solid var(--accent); border-radius: 14px;
+  padding: 15px; font-size: 1.02rem; font-weight: 700;
+}
+.btn-link:active { background: rgba(0, 229, 160, 0.15); }
+.btn-link .dl-icon { font-size: 1.2rem; line-height: 1; }
+.btn-link .dl-sub {
+  display: block; color: var(--muted); font-size: 0.72rem; font-weight: 500;
+  margin-top: 2px;
 }

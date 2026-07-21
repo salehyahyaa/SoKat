@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0c10">
   <title>SpaceScan — closet measurement</title>
-  <link rel="stylesheet" href="css/style.css?v=17">
+  <link rel="stylesheet" href="css/style.css?v=18">
 </head>
 <body>
   <main id="app">
@@ -87,7 +87,11 @@
         <li>Check the print: the checkerboard must be exactly <b>8 × 5 in</b></li>
       </ul>
       <div class="stack push-down">
-        <a id="btn-target-pdf" class="secondary btn-link" href="target.pdf" download="SpaceScan-target.pdf">⬇ Download the target (PDF)</a>
+        <a id="btn-target-pdf" class="btn-link" href="target.pdf" download="SpaceScan-target.pdf">
+          <span class="dl-icon">⤓</span>
+          <span>Download the target PDF
+            <span class="dl-sub">letter paper · print at 100% · no cutting needed</span></span>
+        </a>
         <button id="btn-pguide-continue" class="primary">I taped it — take the photo</button>
         <button id="btn-pguide-home" class="secondary">Back</button>
       </div>
