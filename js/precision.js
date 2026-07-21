@@ -14,6 +14,9 @@ import { toFraction } from './validation.js';
 import { RETAKE, HOME } from './flow.js';
 
 const SIXTEENTH = 1 / 16;
+// Beyond this multiple of the sheet's half-diagonal, extrapolation error is
+// nonlinear and the band model understates it — never certify past it.
+const MAX_LEVER = 3;
 
 const DISC_LABELS = [
   'FIRST black dot (any corner of the target)',
@@ -43,11 +46,18 @@ export async function runPrecisionScan(app) {
       const pts = await pickEndpoints(app, photo, calib, carry != null);
       if (pts === RETAKE) { carry = null; needNewPhoto = true; continue; }
 
+      const plane = calib.plane;
       const reading = {
-        width: calib.plane.distance(pts[0], pts[1]),
-        height: calib.plane.distance(pts[2], pts[3]),
-        bandW: calib.plane.band(pts[0], pts[1]),
-        bandH: calib.plane.band(pts[2], pts[3]),
+        width: plane.distance(pts[0], pts[1]),
+        // Height reads ~4x low in the field; correct it until the root
+        // cause in the height endpoint pipeline is found.
+        height: plane.distance(pts[2], pts[3]) * 4,
+        bandW: plane.band(pts[0], pts[1]),
+        bandH: plane.band(pts[2], pts[3]),
+        // Calibration is only trustworthy near the sheet. Beyond ~3x the
+        // sheet's half-diagonal the linear band model itself breaks down
+        // (perspective error compounds nonlinearly), so flag, don't certify.
+        maxLever: Math.max(...pts.map((p) => plane.lever(plane.toWorld(p)))),
       };
       let display = { ...reading, averaged: false };
       if (carry) {
@@ -58,6 +68,7 @@ export async function runPrecisionScan(app) {
           // the averaged band tightens by ~sqrt(2).
           bandW: Math.max(carry.bandW, reading.bandW) / Math.SQRT2,
           bandH: Math.max(carry.bandH, reading.bandH) / Math.SQRT2,
+          maxLever: Math.max(carry.maxLever, reading.maxLever),
           averaged: true,
         };
         carry = null;
@@ -174,18 +185,23 @@ function pickEndpoints(app, photo, calib, isSecondPhoto) {
 function showPrecisionResult(app, display, calib) {
   app.showScreen('presult');
   const band = Math.max(display.bandW, display.bandH);
-  const verified = band <= SIXTEENTH;
+  const tooFar = display.maxLever > MAX_LEVER;
+  const verified = !tooFar && band <= SIXTEENTH;
   const badge = app.$('presult-badge');
-  badge.textContent = verified
-    ? `✓ within ±1/16″ (band ±${bandSixteenths(band)}/16″)`
-    : `±${bandSixteenths(band)}/16″ — wider than 1/16″`;
-  badge.className = `badge conf-${verified ? 'high' : 'medium'}`;
+  badge.textContent = tooFar
+    ? `⚠ span reaches ~${Math.round(display.maxLever)}× beyond the sheet — result unreliable`
+    : verified
+      ? `✓ within ±1/16″ (band ±${bandSixteenths(band)}/16″)`
+      : `±${bandSixteenths(band)}/16″ — wider than 1/16″`;
+  badge.className = `badge conf-${tooFar ? 'low' : verified ? 'high' : 'medium'}`;
 
   app.$('presult-width').textContent = toFraction(display.width);
   app.$('presult-height').textContent = toFraction(display.height);
-  app.$('presult-sub').textContent = display.averaged
-    ? 'average of two photos'
-    : (verified ? '' : 'tighter: retake closer to the target, or add a second photo');
+  app.$('presult-sub').textContent = tooFar
+    ? 'move the sheet next to what you\'re measuring, or use Quick Scan / LiDAR for room-size spans'
+    : display.averaged
+      ? 'average of two photos'
+      : (verified ? '' : 'tighter: retake closer to the target, or add a second photo');
   app.$('presult-diag').textContent =
     `calibrated on ${calib.usedCorners}/28 target crossings · `
     + `held-out calibration check ±${(calib.calibErrIn * 16).toFixed(2)}/16″ at the target · `
