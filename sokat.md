@@ -126,6 +126,13 @@ mesh (`MeasureSession.swift`); height = vertical distance floor→ceiling marks,
 width = horizontal distance left→right marks. On non-LiDAR iPhones it falls
 back to estimated planes with a visible "accuracy reduced" banner.
 
+**Platform requirement:** LiDAR only works on iOS, and only natively. The
+sensor exists solely on iPhone Pro models (12 Pro and later) and recent iPads
+Pro, and Apple exposes it exclusively through ARKit to native apps — no
+browser has a LiDAR API, which is why this mode cannot exist in the web app.
+Non-Pro iPhones run the same app in a camera-only fallback (~±2″) with a
+visible banner.
+
 **Why ±0.5″ and not better:** the iPhone LiDAR is a sparse (~256×192) depth
 sensor with roughly ±1% depth error; ARKit fuses it with visual tracking, but
 mesh quantization and tracking drift keep practical accuracy at the half-inch
@@ -146,6 +153,13 @@ near a printed reference target. Use it when the number actually matters —
 built-ins, trim carpentry, furniture clearances. Don't use it for rough sizing
 (Quick is faster) or for point-to-point distances that don't lie on one plane
 (no photo mode can do that; that's LiDAR's job at ±0.5″).
+
+**Precision mode does not use LiDAR** — it is camera-plus-printed-sheet only,
+and it runs in Safari, which has no LiDAR access anyway. LiDAR and Precision
+are opposite strategies: LiDAR measures depth with a laser and caps out at
+±0.5″; Precision skips depth sensing entirely and pins the geometry to
+manufactured ground truth in the photo, which is how it reaches 1/16″ — an
+accuracy the LiDAR sensor is physically incapable of.
 
 **User workflow:**
 
